@@ -1,20 +1,17 @@
-# tests/test_parser.py
-
 import os
-import sys
-import pytest
 
-# ➤ Pour permettre d'importer le module src/parser.py
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
-
-from parser import collect_all_dependencies
+from src import parser
 
 def test_collect_all_dependencies_on_example_project():
+    """
+    L'application doit pouvoir récupérer les imports attendus pour les fichiers du projet d’exemple
+    L'application doit pouvoir récupérer les clés du dictionnaire (les fichiers trouvés) correctes
+    """
     # Arrange : chemin du projet d'exemple
     project_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'examples', 'project1'))
 
     # Act : collecte des dépendances
-    deps = collect_all_dependencies(project_path)
+    deps = parser.collect_all_dependencies(project_path)
 
     # Assert : vérifications de base
     assert isinstance(deps, dict), "Le résultat doit être un dictionnaire"
