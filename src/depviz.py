@@ -27,7 +27,7 @@ def main():
         "--format",
         default="png",
         choices=["png", "svg", "pdf", "dot"],
-        help="Graph output format (default: png)."
+        help="Graph output format."
     )
 
     args = parser.parse_args()
