@@ -40,7 +40,7 @@ options:
   -h, --help                   Show this help message and exit
   --path PATH                  Path to the Python project directory to be analysed. (default: None)
   --export PATH                Path (without extension) to export the graph (e.g. ./output/dependencies). (default: None)
-  --format {png,svg,pdf,dot}   Graph output format (default: png). (default: png)
+  --format {png,svg,pdf,dot}   Graph output format. (default: png)
 ```
 
 ---
