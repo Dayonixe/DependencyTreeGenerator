@@ -3,4 +3,5 @@ venv/
 .pytest_cache/
 src/__pycache__/
 tests/__pycache__/
-src/main.py
+main.py
+output/
