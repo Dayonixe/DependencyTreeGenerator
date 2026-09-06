@@ -1,2 +1,2 @@
-pytest
-graphviz
+pytest==8.4.2
+graphviz==0.21

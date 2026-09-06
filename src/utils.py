@@ -1,114 +1,93 @@
-import importlib.util
-import os
+from functools import lru_cache
+from importlib.metadata import packages_distributions
+from pathlib import Path
+import sys
+
+from .models import ImportReference, ModuleMap
+
+
+@lru_cache(maxsize=1)
+def _installed_module_names() -> frozenset[str]:
+    """Read distribution metadata once, without importing installed packages."""
+    return frozenset(packages_distributions())
 
 
 def is_standard_or_external(module_name: str) -> bool:
+    """Classify an absolute module by its top-level name, without executing it.
+
+    Callers should resolve against the project map first, so local files take
+    precedence. A relative import can never refer to an external dependency.
     """
-    Determines whether a module is standard (built-in, stdlib) or external (installed via pip).
-
-    :param module_name: Name of the module to be checked (e.g. 'os', 'numpy', 'helpers.utils')
-
-    :return: True if the module is standard or external, False otherwise (potentially internal)
-    """
-    try:
-        spec = importlib.util.find_spec(module_name)
-        if spec is None:
-            return False
-
-        origin = spec.origin
-
-        # Built-in modules
-        if origin in (None, 'built-in', 'frozen'):
-            return True
-
-        # Standardisation
-        origin = origin.lower()
-
-        # Standard or external modules installed
-        if any(part in origin for part in [
-                'site-packages',
-                'dist-packages',
-                'python',      # Covers pythonXY.dll, pythonXY.zip, lib-dynload, etc.
-                'lib'          # Useful on Windows
-            ]):
-            return True
-
+    if not module_name or module_name.startswith("."):
         return False
-
-    except Exception:
-        return False
-
-
-def is_internal_module(module_name: str, module_map: dict[str, str]) -> bool:
-    """
-    Check whether a module is internal to the project (and not standard or external).
-
-    :param module_name: Name of the module to be checked (e.g. 'utils', 'helpers.math')
-    :param module_map: Dictionary of detected internal modules (e.g. 'utils' -> 'utils.py')
-
-    :return: True if the module is considered internal, False otherwise
-    """
-    # If it is standard/external, it is automatically excluded
-    if is_standard_or_external(module_name):
-        return False
-
-    # Otherwise, we check whether it exists in the map module (in different forms)
-    if module_name in module_map:
-        return True
-
-    base = module_name.split('.')[0]
-    return base in module_map
+    root = module_name.split(".", 1)[0]
+    return root in sys.stdlib_module_names or root in _installed_module_names()
 
 
-def resolve_module_name(module_name: str, module_map: dict[str, list[str]], current_file: str | None = None, project_path: str | None = None) -> str | None:
-    """
-    Resolves a logical module name (e.g. ‘utils’ or ‘helpers.math’) to a Python file path,
-    taking into account the context of the calling file.
-
-    :param module_name: Name of the module to be resolved (e.g. 'utils', 'helpers.math')
-    :param module_map: Dictionary of detected internal modules (e.g. 'utils' -> ['src/utils.py'])
-    :param current_file: Relative path of the calling source file (optional, to evaluate proximity)
-    :param project_path: Project root, used to convert paths to absolute paths
-
-    :return: Relative path of the resolved file, or None if not found
-    """
-    candidates = []
-
-    def add_candidate(name):
-        if name in module_map:
-            for path in module_map[name]:
-                candidates.append((name, path))
-
-    add_candidate(module_name)
-
-    parts = module_name.split('.')
-    while len(parts) > 1:
-        parts.pop()
-        add_candidate('.'.join(parts))
-
-    if not candidates:
+def _absolute_name(
+    module_name: str,
+    current_file: str | None,
+    project_path: str | None,
+) -> str | None:
+    level = len(module_name) - len(module_name.lstrip("."))
+    if not level:
+        return module_name
+    if current_file is None:
         return None
 
-    # If context is provided: choose the closest one
-    if current_file and project_path:
-        current_dir = os.path.abspath(os.path.join(project_path, os.path.dirname(current_file)))
-        best_score = float('inf')
-        best_match = None
+    # Accept either path separator for callers supplying portable relative paths.
+    package = current_file.replace("\\", "/").split("/")[:-1]
+    if project_path:
+        root = Path(project_path).resolve()
+        if (root / "__init__.py").is_file():
+            package.insert(0, root.name)
+    if level > len(package):
+        return None
+    base = package[:len(package) - level + 1]
+    suffix = module_name[level:]
+    return ".".join(base + ([suffix] if suffix else []))
 
-        for _, rel_path in candidates:
-            abs_path = os.path.abspath(os.path.join(project_path, rel_path))
-            mod_dir = os.path.dirname(abs_path)
 
-            try:
-                distance = os.path.relpath(mod_dir, current_dir).count(os.sep)
-            except ValueError:
-                distance = float('inf')
+def resolve_module_name(
+    module_name: str,
+    module_map: ModuleMap,
+    current_file: str | None = None,
+    project_path: str | None = None,
+) -> str | None:
+    """Resolve an exact module name, anchored at the current package if relative.
 
-            if distance < best_score:
-                best_score = distance
-                best_match = rel_path
+    Absolute imports use the selected project root, never directory proximity.
+    Missing prefixes can be namespace packages, but a .py module cannot contain
+    submodules. Symbol fallback is handled separately by resolve_import.
+    """
+    absolute = _absolute_name(module_name, current_file, project_path)
+    if not absolute:
+        return None
+    parts = absolute.split(".")
+    for length in range(1, len(parts)):
+        parent = module_map.get(".".join(parts[:length]), [])
+        if parent and parent[0].replace("\\", "/").rsplit("/", 1)[-1] != "__init__.py":
+            return None
+    candidates = module_map.get(absolute, [])
+    return candidates[0] if candidates else None
 
-        return best_match
 
-    # Otherwise, return the first one
-    return candidates[0][1]
+def resolve_import(
+    reference: ImportReference,
+    module_map: ModuleMap,
+    current_file: str | None = None,
+    project_path: str | None = None,
+) -> str | None:
+    """Resolve a from-import to its submodule, or to the module owning its symbol."""
+    if reference.name not in (None, "*"):
+        target = resolve_module_name(
+            reference.target, module_map, current_file, project_path
+        )
+        if target is not None:
+            return target
+    return resolve_module_name(reference.base, module_map, current_file, project_path)
+
+
+def is_internal_module(module_name: str, module_map: ModuleMap) -> bool:
+    """Whether an absolute module has an exact, importable project file."""
+    return resolve_module_name(module_name, module_map) is not None

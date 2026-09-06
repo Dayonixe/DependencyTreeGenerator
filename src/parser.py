@@ -1,107 +1,97 @@
 import ast
+from collections.abc import Iterator
 import os
-from collections import defaultdict
-from .utils import is_standard_or_external
+from pathlib import Path
+import tokenize
+import warnings
+
+from .models import ImportReference, ModuleMap
 
 
-def extract_imports_from_file(filepath: str) -> list[str]:
+EXCLUDED_DIRECTORIES = frozenset({
+    ".git", ".hg", ".svn", ".venv", "venv", "env", ".env",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".tox", ".nox", "node_modules", "site-packages", "dist-packages",
+})
+
+
+class AnalysisWarning(UserWarning):
+    """A source file or directory could not be analysed."""
+
+
+def _warn_unreadable(error: OSError) -> None:
+    warnings.warn(f"Cannot read {error.filename}: {error}", AnalysisWarning, stacklevel=2)
+
+
+def iter_python_files(project_path: str) -> Iterator[str]:
+    """Walk sources deterministically, pruning caches and virtual environments."""
+    for root, directories, files in os.walk(project_path, onerror=_warn_unreadable):
+        if "pyvenv.cfg" in files:
+            directories[:] = []
+            continue
+        directories[:] = sorted(
+            directory for directory in directories
+            if directory not in EXCLUDED_DIRECTORIES
+        )
+        for filename in sorted(files):
+            if filename.endswith(".py"):
+                yield os.path.join(root, filename)
+
+
+def extract_imports_from_file(filepath: str) -> list[ImportReference]:
+    """Read Python's declared source encoding and extract imports without execution.
+
+    Unreadable or invalid files emit AnalysisWarning and contribute no imports;
+    collection continues so one bad file does not discard the rest of a project.
     """
-    Analyses a Python file to extract imported modules.
-
-    :param filepath: Path to the Python file to be analysed
-
-    :return: List of imported modules (paths as strings)
-    """
-    # Using 'ast' to transform Python code into a syntax tree
-    with open(filepath, "r", encoding="utf-8") as f:
-        try:
-            tree = ast.parse(f.read(), filename=filepath)
-        except SyntaxError:
-            return []
+    try:
+        with tokenize.open(filepath) as source:
+            tree = ast.parse(source.read(), filename=filepath)
+    except (OSError, SyntaxError, UnicodeError, LookupError) as error:
+        warnings.warn(
+            f"Cannot analyse {filepath}: {error}", AnalysisWarning, stacklevel=2
+        )
+        return []
 
     imports = []
-
-    # Traverses all nodes in the tree
     for node in ast.walk(tree):
-
-        # Recording of 'Imports'
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append(alias.name)
-
-        # Recording 'From ... Import ...'
+            imports.extend(ImportReference(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            base = node.module if node.module else ""
-            level = node.level if hasattr(node, 'level') else 0
-
-            # Reconstruct the path with the points (e.g. .parser = parser with level=1)
-            if level > 0:
-                dots = "." * level
-                base = f"{dots}{base}"
-
-            for alias in node.names:
-                name = alias.name
-                # E.g.: .parser -> .parser.collect_all_dependencies
-                full_name = f"{base}.{name}" if name != "*" else base
-                imports.append(full_name.lstrip("."))
-
+            imports.extend(
+                ImportReference(node.module or "", alias.name, node.level)
+                for alias in node.names
+            )
     return imports
 
 
-def collect_all_dependencies(project_path: str) -> dict[str, list[str]]:
+def collect_all_dependencies(project_path: str) -> dict[str, list[ImportReference]]:
+    """Map project-relative source paths to their structured import references."""
+    return {
+        os.path.relpath(filepath, project_path): extract_imports_from_file(filepath)
+        for filepath in iter_python_files(project_path)
+    }
+
+
+def build_module_map(project_path: str) -> ModuleMap:
+    """Index canonical module names relative to the chosen import root.
+
+    If the root itself has __init__.py, its directory name is the package prefix.
+    Packages map to __init__.py. No basename aliases or runtime imports are used.
     """
-    Analyses all Python files in a folder to build a dependency map for each file.
+    root = Path(project_path).resolve()
+    prefix = (root.name,) if (root / "__init__.py").is_file() else ()
+    module_map: ModuleMap = {}
+    for filepath in iter_python_files(str(root)):
+        relative = Path(filepath).relative_to(root)
+        parts = relative.with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        name = ".".join(prefix + parts)
+        if name:
+            module_map.setdefault(name, []).append(str(relative))
 
-    :param project_path: Path to the directory of the project to be analysed
-
-    :return: Relative file dictionary -> list of imported modules
-    """
-    dependencies = {}
-
-    # Browse all subfolders of the folder passed as a parameter
-    for root, _, files in os.walk(project_path):
-        for file in files:
-            # Processing Python files
-            if file.endswith(".py"):
-                # Calculating the absolute path and the relative path to the project
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, project_path)
-
-                # Obtaining file imports and storing them in the dictionary
-                imports = extract_imports_from_file(full_path)
-                dependencies[rel_path] = imports
-
-    return dependencies
-
-
-def build_module_map(project_path: str) -> dict[str, list[str]]:
-    """
-    Creates a correspondence between internal module names and Python files in the project.
-
-    :param project_path: Path to the project directory
-
-    :return: Dictionary module_name -> list of relative paths to the corresponding files
-    """
-    module_map = defaultdict(list)
-
-    for root, _, files in os.walk(project_path):
-        for file in files:
-            if file.endswith(".py"):
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, project_path)
-
-                module_name = os.path.splitext(rel_path)[0].replace(os.sep, ".")
-
-                short_name = os.path.splitext(file)[0]
-                base_folder = os.path.basename(os.path.dirname(full_path))
-                with_base = f"{base_folder}.{short_name}"
-
-                def add(name):
-                    if not is_standard_or_external(name):
-                        module_map[name].append(rel_path)
-
-                add(module_name)
-                add(short_name)
-                add(with_base)
-
-    return dict(module_map)
+    # Python prefers a regular package over a same-named .py module.
+    for candidates in module_map.values():
+        candidates.sort(key=lambda path: (Path(path).name != "__init__.py", path))
+    return module_map
