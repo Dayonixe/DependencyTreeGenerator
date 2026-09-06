@@ -13,6 +13,11 @@ a directed graph. It does not import the analysed code.
 | `output.py` | Shared export paths, TXT and ASCII reports, cycle/shared-branch markers and UTF-8 text exports. |
 | `graph_generator.py` | Build an inspectable `Digraph`, normalise Windows paths and export DOT or native Graphviz formats. |
 | `depviz.py` | Parse/validate CLI options, route TXT/ASCII/DOT to stdout or files, export PNG and report status/errors on stderr. |
+| `desktop/data.py` | GUI graph data, display filtering and an iterative layout that condenses cycles. |
+| `desktop/graph.py` | Movable Qt nodes and directed edges, pan/zoom, selection and native PNG/SVG scene exports. |
+| `desktop/worker.py` | Cancellable background execution of the shared analyser; delivers immutable-by-convention result snapshots. |
+| `desktop/window.py` | Project controls, file tree, graph, calls table, source inspector, diagnostics and export dialogs. |
+| `depviz_gui.py` | Optional Qt entry point, packaged startup and smoke verification. |
 
 The analysis root determines import names. A selected package root retains its
 directory name as a prefix. `pkg/__init__.py` maps to `pkg`; nested files never get
@@ -59,3 +64,16 @@ creates a PNG file by default. Diagnostics and file-generation notices go to
 stderr so text and DOT output can be redirected without log contamination.
 The legacy `--format` option is mutually exclusive with `--output`; `--export`
 continues to select the destination and defaults to PNG when no format is given.
+
+The CLI never imports Qt. The optional desktop entry point consumes `ProjectAnalysis`
+from `analyze_project()` with an optional `on_progress` callback for cancellation
+checkpoints. A `QThread` owns analysis work; widgets are updated through queued Qt
+signals on the main thread. Cancelling or closing requests interruption and waits
+for the next checkpoint instead of terminating a thread during parsing.
+
+Display filters affect the Qt graph, not the analysis snapshot. The scene is bounded
+to 500 nodes and uses iterative strongly connected components followed by dependency
+levels. Directory selection, depth and ignore rules are shared with the CLI. PNG/SVG
+exports render the visible Qt scene directly; full DOT/TXT/ASCII exports reuse the
+existing report generators. The portable Windows build is a PyInstaller folder ZIP,
+with Qt libraries, example data, sources and third-party notices alongside the app.

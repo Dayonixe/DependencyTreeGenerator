@@ -1,7 +1,7 @@
 """Resolve explicit calls using AST bindings; never import the analysed code."""
 
 import ast
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import os
 
@@ -363,6 +363,8 @@ def analyze_project(
     project_path: str,
     max_depth: int | None = None,
     ignore: Sequence[str] = (),
+    *,
+    on_progress: Callable[[str], None] | None = None,
 ) -> ProjectAnalysis:
     """Parse each selected file once, then resolve calls across the project index."""
     dependencies = {}
@@ -370,6 +372,8 @@ def analyze_project(
     observed = {}
     for path in iter_python_files(project_path, max_depth, ignore):
         relative = os.path.relpath(path, project_path)
+        if on_progress is not None:
+            on_progress(relative)
         tree = parse_python_file(path)
         dependencies[relative] = extract_imports_from_tree(tree) if tree is not None else []
         if tree is not None:
@@ -381,6 +385,8 @@ def analyze_project(
     resolver = _Resolver(module_map, exports, project_path)
     calls = []
     for source, observations in observed.items():
+        if on_progress is not None:
+            on_progress(source)
         for call in observations:
             target = resolver.resolve(call.value)
             if isinstance(target, _Function) and target.file != source:

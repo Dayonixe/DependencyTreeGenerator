@@ -37,6 +37,22 @@ Text analysis uses only Python's standard library. DOT export requires the Pytho
 
 ## User manual
 
+### Graphical desktop application
+
+Depviz also provides a portable Windows desktop application: interactive dependency
+graph, search and display filters, project file tree, function-call navigation,
+read-only source inspector, cancellable background analysis and PNG/SVG/DOT/TXT/ASCII
+exports. The portable ZIP includes Python and Qt and needs no native Graphviz.
+
+```bash
+python -m pip install -r config/requirements-gui.txt
+python -m src.depviz_gui --path examples/advanced
+```
+
+See the [desktop guide](docs/desktop.md) for controls, portable builds and tests.
+
+### Command-line application
+
 Run from the repository root with either entry point:
 
 ```bash

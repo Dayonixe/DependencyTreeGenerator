@@ -5,3 +5,7 @@ src/__pycache__/
 tests/__pycache__/
 main.py
 output/
+.venv-gui/
+build/
+dist/
+**/__pycache__/

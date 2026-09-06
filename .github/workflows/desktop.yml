@@ -1,0 +1,56 @@
+name: Build portable desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: "config/requirements*.txt"
+      - name: Install build dependencies
+        run: python -m pip install -r config/requirements-build.txt
+      - name: Test desktop behavior
+        run: python -m pytest tests/test_desktop_data.py tests/test_desktop_gui.py
+      - name: Build portable application
+        run: python scripts/build_portable.py
+      - name: Verify packaged application and exports
+        shell: pwsh
+        run: |
+          $smokeOutput = Join-Path $PWD 'output/portable-smoke'
+          $process = Start-Process -FilePath 'dist/Depviz/Depviz.exe' -ArgumentList @('--smoke-test', ('"' + $smokeOutput + '"')) -PassThru -WindowStyle Hidden
+          if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'Packaged application timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Packaged application failed' }
+          $result = Get-Content (Join-Path $smokeOutput 'smoke.json') | ConvertFrom-Json
+          if ($result.files -ne 6 -or $result.calls -ne 4 -or $result.diagnostics.Count -ne 0) { throw 'Unexpected packaged analysis' }
+          foreach ($name in @('graph.png', 'graph.svg', 'graph.dot', 'graph.txt', 'tree.txt', 'window.png')) {
+            if ((Get-Item (Join-Path $smokeOutput $name)).Length -eq 0) { throw "Empty export: $name" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Depviz-windows-portable
+          path: |
+            dist/*-portable.zip
+            dist/*-portable.zip.sha256
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-smoke-results
+          path: output/portable-smoke/
+          if-no-files-found: ignore
