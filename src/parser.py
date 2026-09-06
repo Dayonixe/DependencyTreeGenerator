@@ -117,31 +117,39 @@ def iter_python_files(
                 yield full_path
 
 
-def extract_imports_from_file(filepath: str) -> list[ImportReference]:
-    """Read Python's declared source encoding and extract imports without execution.
+def parse_python_file(filepath: str) -> ast.Module | None:
+    """Read Python's declared source encoding and parse without execution.
 
     Unreadable or invalid files emit AnalysisWarning and contribute no imports;
     collection continues so one bad file does not discard the rest of a project.
     """
     try:
         with tokenize.open(filepath) as source:
-            tree = ast.parse(source.read(), filename=filepath)
+            return ast.parse(source.read(), filename=filepath)
     except (OSError, SyntaxError, UnicodeError, LookupError) as error:
         warnings.warn(
             f"Cannot analyse {filepath}: {error}", AnalysisWarning, stacklevel=2
         )
-        return []
+        return None
 
+
+def extract_imports_from_tree(tree: ast.Module) -> list[ImportReference]:
     imports = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.extend(ImportReference(alias.name) for alias in node.names)
+            imports.extend(ImportReference(alias.name, alias=alias.asname) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             imports.extend(
-                ImportReference(node.module or "", alias.name, node.level)
+                ImportReference(node.module or "", alias.name, node.level, alias.asname)
                 for alias in node.names
             )
     return imports
+
+
+def extract_imports_from_file(filepath: str) -> list[ImportReference]:
+    """Extract imports from one file, warning and returning [] if it is invalid."""
+    tree = parse_python_file(filepath)
+    return extract_imports_from_tree(tree) if tree is not None else []
 
 
 def collect_all_dependencies(
@@ -166,11 +174,17 @@ def build_module_map(
     If the root itself has __init__.py, its directory name is the package prefix.
     Packages map to __init__.py. No basename aliases or runtime imports are used.
     """
+    files = [os.path.relpath(path, project_path) for path in iter_python_files(project_path, max_depth, ignore)]
+    return module_map_from_files(project_path, files)
+
+
+def module_map_from_files(project_path: str, files: Sequence[str]) -> ModuleMap:
+    """Index an already selected list of project-relative files without rescanning."""
     root = Path(project_path).resolve()
     prefix = (root.name,) if (root / "__init__.py").is_file() else ()
     module_map: ModuleMap = {}
-    for filepath in iter_python_files(project_path, max_depth, ignore):
-        relative = Path(os.path.relpath(filepath, project_path))
+    for filepath in files:
+        relative = Path(filepath)
         parts = relative.with_suffix("").parts
         if parts[-1] == "__init__":
             parts = parts[:-1]

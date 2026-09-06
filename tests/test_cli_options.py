@@ -7,7 +7,7 @@ import pytest
 from src.depviz import main
 
 
-@pytest.mark.parametrize("output_format", ["txt", "dot"])
+@pytest.mark.parametrize("output_format", ["txt", "dot", "ascii"])
 def test_output_formats_apply_depth_and_multiple_ignore_options(make_project, capsys, output_format):
     root = make_project({
         "main.py": "import os\n",
@@ -36,7 +36,7 @@ def test_output_formats_apply_depth_and_multiple_ignore_options(make_project, ca
         assert "import math" in output.out
 
 
-@pytest.mark.parametrize("output_format", ["txt", "dot"])
+@pytest.mark.parametrize("output_format", ["txt", "dot", "ascii"])
 def test_exported_text_matches_stdout(make_project, capsys, output_format):
     root = make_project({"main.py": "import os\n"})
     arguments = ["--path", str(root), "--output", output_format]
@@ -48,7 +48,8 @@ def test_exported_text_matches_stdout(make_project, capsys, output_format):
     exported = capsys.readouterr()
     assert exported.out == ""
     assert "Generated" in exported.err
-    report = root / "reports" / f"dependency_graph.{output_format}"
+    extension = "txt" if output_format == "ascii" else output_format
+    report = root / "reports" / f"dependency_graph.{extension}"
     assert report.read_text(encoding="utf-8") == stdout.out
 
 

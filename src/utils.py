@@ -24,7 +24,7 @@ def is_standard_or_external(module_name: str) -> bool:
     return root in sys.stdlib_module_names or root in _installed_module_names()
 
 
-def _absolute_name(
+def absolute_module_name(
     module_name: str,
     current_file: str | None,
     project_path: str | None,
@@ -60,7 +60,7 @@ def resolve_module_name(
     Missing prefixes can be namespace packages, but a .py module cannot contain
     submodules. Symbol fallback is handled separately by resolve_import.
     """
-    absolute = _absolute_name(module_name, current_file, project_path)
+    absolute = absolute_module_name(module_name, current_file, project_path)
     if not absolute:
         return None
     parts = absolute.split(".")

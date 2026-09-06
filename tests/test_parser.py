@@ -86,8 +86,8 @@ def test_imports_preserve_symbols_aliases_and_relative_levels(make_project):
     )})
     imports = extract_imports_from_file(str(root / "main.py"))
     assert imports == [
-        ImportReference("os"), ImportReference("sys"),
-        ImportReference("collections", "defaultdict"),
+        ImportReference("os", alias="operating_system"), ImportReference("sys"),
+        ImportReference("collections", "defaultdict", alias="factory"),
         ImportReference("utils", "VALUE", 1),
         ImportReference("utils", "VALUE", 2),
         ImportReference("", "utils", 1),
@@ -97,6 +97,10 @@ def test_imports_preserve_symbols_aliases_and_relative_levels(make_project):
     assert [reference.target for reference in imports[3:]] == [
         ".utils.VALUE", "..utils.VALUE", ".utils", "..sibling", ".utils",
     ]
+    assert imports[0].binding == "operating_system"
+    assert str(imports[0]) == "import os as operating_system"
+    assert imports[2].binding == "factory"
+    assert str(imports[2]) == "from collections import defaultdict as factory"
 
 
 @pytest.mark.parametrize("content", [

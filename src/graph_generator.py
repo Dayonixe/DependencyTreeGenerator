@@ -1,6 +1,9 @@
+from collections import defaultdict
+from collections.abc import Sequence
+
 from graphviz import Digraph
 
-from .models import ImportReference, ModuleMap
+from .models import FunctionCall, ImportReference, ModuleMap
 from .output import prepare_output_stem
 from .utils import is_standard_or_external, resolve_import
 
@@ -24,6 +27,7 @@ def create_dependency_graph(
     module_map: ModuleMap,
     project_path: str,
     output_format: str = "png",
+    calls: Sequence[FunctionCall] = (),
 ) -> Digraph:
     """Build an inspectable graph without writing files or invoking Graphviz."""
     dot = Digraph(comment="Dependency Graph", format=output_format)
@@ -58,6 +62,17 @@ def create_dependency_graph(
                 dot.node(resolved, **node_style)
                 dot.edge(source_id, resolved, style="solid", color=edge_color)
                 seen_edges.add(resolved)
+    call_edges = defaultdict(list)
+    for call in calls:
+        call_edges[(call.source_file, call.target_file)].append(call)
+    for (source, target), edge_calls in sorted(call_edges.items()):
+        dot.edge(
+            file_id(source), file_id(target), style="dashed", color="#7851A9",
+            label="\n".join(
+                f"{call.target_function}() [line {call.lineno}]" for call in edge_calls
+            ),
+            tooltip="\n".join(f"{call.caller}: {call.expression}()" for call in edge_calls),
+        )
     return dot
 
 
@@ -67,6 +82,7 @@ def build_dependency_graph(
     project_path: str,
     output_path: str = "output/dependency_graph",
     output_format: str = "png",
+    calls: Sequence[FunctionCall] = (),
 ) -> str:
     """Export the graph; DOT source needs no native Graphviz executable.
 
@@ -74,7 +90,7 @@ def build_dependency_graph(
     directories and paths ending in a separator use the stem dependency_graph.
     Returns the actual output filename and lets the CLI report rendering errors.
     """
-    dot = create_dependency_graph(dependencies, module_map, project_path, output_format)
+    dot = create_dependency_graph(dependencies, module_map, project_path, output_format, calls)
     output_path = prepare_output_stem(output_path)
     if output_format == "dot":
         return dot.save(filename=output_path + ".dot")
