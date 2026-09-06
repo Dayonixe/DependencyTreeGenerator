@@ -37,57 +37,87 @@ Text analysis uses only Python's standard library. DOT export requires the Pytho
 
 ## User manual
 
-To simply run the script, you can use the following command:
-```bash
-python -m src.depviz --path examples/project1
-```
-
-Without `--export`, imports are displayed in the terminal and no graph file is
-created. The command prints a reminder showing how to request an export.
-
-Direct script execution is also supported, including help and graph exports:
+Run from the repository root with either entry point:
 
 ```bash
-python3 src/depviz.py --path examples/project1/
+python3 src/depviz.py --path examples/project1/ --output txt
+python3 -m src.depviz --path examples/project1/ --output txt
 python3 src/depviz.py -h
 ```
 
 Use `python` instead of `python3` if that is your interpreter's command name.
-When launching the script by absolute path from another directory, `--path` and
-`--export` remain relative to your current working directory.
+The script also works by absolute path from another directory. The analysis and
+export paths are relative to the current working directory.
 
-For more details, you have the following helper:
-```bash
-usage: depviz.py [-h] --path PATH [--export PATH] [--format {png,svg,pdf,dot}]
+| Option | Behaviour |
+| --- | --- |
+| `--path PATH` | Required Python import root or package directory. |
+| `--output {dot,png,txt}` | TXT by default. TXT/DOT go to stdout; PNG creates `dependency_graph.png` in the current directory. |
+| `--max-depth N` | Non-negative subdirectory depth: 0 = root files, 1 = root and immediate subdirectories. Omit for unlimited depth. |
+| `--ignore PATTERN [PATTERN ...]` | Exclude file/directory names, paths or globs. Accepts multiple values and repeated occurrences. |
+| `--export PATH` | Write the selected format to a directory or filename without extension instead of stdout/the default PNG destination. |
+| `--format {png,svg,pdf,dot}` | Compatibility option for existing commands. Cannot be combined with `--output`. |
 
-Static dependency analyser for Python projects.
-
-options:
-  -h, --help                   Show this help message and exit
-  --path PATH                  Python import root or package directory to analyse.
-  --export PATH                Destination directory or filename without extension; omit for terminal output only.
-  --format {png,svg,pdf,dot}   Graph output format. (default: png)
-```
-
-Export a graph into the current directory, without installing native Graphviz:
+Analyse two directory levels, excluding tests and generated Python files:
 
 ```bash
-python -m src.depviz --path examples/project1 --export dependencies --format dot
+python3 src/depviz.py --path . --output txt --max-depth 2 --ignore tests "generated_*.py"
 ```
 
-For a rendered image, use `--format png`, `svg` or `pdf`. Parent output directories
-are created automatically.
-
-To save `dependency_graph.png` in the current working directory:
+Produce DOT for a pipe or shell redirection. Progress and errors use stderr, so
+stdout contains only the requested TXT report or DOT document:
 
 ```bash
-python3 src/depviz.py --path examples/project1/ --export . --format png
+python3 src/depviz.py --path examples/project1/ --output dot > dependencies.dot
 ```
+
+Create a PNG, or save a text report:
+
+```bash
+python3 src/depviz.py --path examples/project1/ --output png
+python3 src/depviz.py --path examples/project1/ --output png --export output/
+python3 src/depviz.py --path examples/project1/ --output txt --export output/report
+```
+
+These commands write `dependency_graph.png`, `output/dependency_graph.png`
+and `output/report.txt`, respectively. TXT output and export need only Python's
+standard library. DOT requires the Python `graphviz` package; PNG also requires
+the native `dot` executable.
 
 An existing directory passed to `--export` receives `dependency_graph.<format>`.
-To create a new destination directory, end its path with `/`, for example
-`--export output/`. Otherwise, the path is treated as a filename without extension:
-`--export output/dependencies` writes `output/dependencies.png` with the default format.
+To create a new destination directory, end its path with `/`.
+Otherwise, the path is a filename without extension. Parent directories are
+created automatically. Text files are encoded as UTF-8.
+
+Existing commands such as `--export . --format png` continue to work.
+For compatibility, `--export` alone still selects PNG; use `--output txt`
+explicitly when saving a text report.
+
+### Depth and exclusions
+
+Depth counts source directories, not dependency-graph hops. For example,
+`main.py` has depth 0, `pkg/tool.py` depth 1 and `pkg/sub/tool.py`
+depth 2. The same limits apply to file collection and module indexing.
+Directories beyond the limit or matched by an exclusion are not traversed.
+
+Ignore patterns supplement the built-in exclusions:
+
+- A bare name such as `tests` matches files or directories with that basename anywhere.
+- A root-relative path such as `pkg/generated.py` excludes that specific path.
+  Prefix a root-level name with `./` to anchor it, e.g. `./tests`.
+- `*`, `?` and character classes match within one path segment.
+  `**` spans zero or more directories: `**/test_*.py` also matches root-level tests.
+- A trailing `/` matches directories only. Absolute paths are also accepted.
+- Quote globs to prevent your shell from expanding them before the CLI receives them.
+
+```bash
+python3 src/depviz.py --path . --output dot --max-depth 3 --ignore tests .venv --ignore "pkg/generated/**" --export output/
+```
+
+Imports written in retained files remain in the report even when their targets
+are outside the selected files. Those targets are unresolved in the graph unless
+recognised as standard or installed dependencies. Excluded files have no source
+nodes or outgoing edges. An empty selection is a successful empty report.
 
 ### Resolution and diagnostics
 
@@ -114,6 +144,7 @@ Python encoding declarations and UTF-8 BOMs are honoured. Unreadable or invalid 
 produce a diagnostic on stderr while the other files are still analysed. Requested
 exports can therefore be partial; the command returns exit code 1 if any source
 could not be analysed or an export failed, and 0 after a complete successful analysis.
+Invalid CLI arguments (including negative depths and unsupported formats) return exit code 2.
 
 This is a static graph of explicit import statements, including imports inside
 functions and conditional blocks. Dynamic imports, changes to `sys.path`, custom
@@ -127,6 +158,8 @@ Each reference stores `module`, `name` (for a from-import) and `level` (relative
 `collect_all_dependencies()` returns these lists indexed by relative file path.
 Use `str(reference)` to display the import statement or `reference.target` for its
 qualified target. Module maps consistently use `dict[str, list[str]]`.
+Both `collect_all_dependencies()` and `build_module_map()` accept
+`max_depth=None` and `ignore=()` keyword arguments for the same source selection.
 
 `create_dependency_graph()` returns a Graphviz `Digraph` for inspection without
 rendering. `build_dependency_graph()` exports it and returns the output filename.
@@ -138,7 +171,8 @@ python -m pytest tests/
 ```
 
 The tests cover exact import destinations and graph edges, package discovery,
-side-effect-free analysis, encodings, exclusions, diagnostics and CLI exports.
+side-effect-free analysis, encodings, depth limits, ignore patterns, clean stdout/stderr,
+argument validation, diagnostics and CLI exports.
 PNG/SVG/PDF integration tests are skipped locally when `dot` is unavailable.
 CI installs and checks Graphviz before running tests on Linux (Python 3.10–3.12)
 and Windows (Python 3.12).

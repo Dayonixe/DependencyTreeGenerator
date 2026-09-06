@@ -1,8 +1,7 @@
-import os
-
 from graphviz import Digraph
 
 from .models import ImportReference, ModuleMap
+from .output import prepare_output_stem
 from .utils import is_standard_or_external, resolve_import
 
 
@@ -76,13 +75,7 @@ def build_dependency_graph(
     Returns the actual output filename and lets the CLI report rendering errors.
     """
     dot = create_dependency_graph(dependencies, module_map, project_path, output_format)
-    output_path = os.fspath(output_path)
-    separators = (os.sep,) + ((os.altsep,) if os.altsep else ())
-    if os.path.isdir(output_path) or output_path.endswith(separators):
-        output_path = os.path.join(output_path, "dependency_graph")
-    parent = os.path.dirname(output_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
+    output_path = prepare_output_stem(output_path)
     if output_format == "dot":
         return dot.save(filename=output_path + ".dot")
     return dot.render(output_path, cleanup=True)

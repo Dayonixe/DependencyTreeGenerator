@@ -18,36 +18,40 @@ def test_cli_exports_dot_with_bare_filename(make_project, monkeypatch, capsys):
     assert result == 0
     assert (root / "graph.dot").is_file()
     output = capsys.readouterr()
-    assert "from os import getenv" in output.out
-    assert "Generated graph:" in output.out
-    assert output.err == ""
+    assert output.out == ""
+    assert "Generated graph:" in output.err
+    assert '"main.py" -> os' in (root / "graph.dot").read_text(encoding="utf-8")
 
 
-def test_cli_without_export_explains_how_to_save_a_graph(make_project, monkeypatch, capsys):
+def test_cli_defaults_to_plain_text_on_stdout(make_project, monkeypatch, capsys):
     root = make_project({"main.py": "import os\n"})
     monkeypatch.chdir(root)
     assert main(["--path", "."]) == 0
     output = capsys.readouterr()
     assert "import os" in output.out
-    assert "To save a graph, add --export ." in output.out
-    assert "dependency_graph.png" in output.out
+    assert "--export" not in output.out
     assert output.err == ""
     assert sorted(path.name for path in root.iterdir()) == ["main.py"]
 
 
 @pytest.mark.skipif(shutil.which("dot") is None, reason="Graphviz dot is not installed")
-def test_direct_execution_exports_png_to_current_directory(make_project):
+@pytest.mark.parametrize("output_options", [
+    ["--export", ".", "--format", "png"],
+    ["--export", "."],
+    ["--output", "png"],
+])
+def test_direct_execution_exports_png_to_current_directory(make_project, output_options):
     root = make_project({"examples/project1/main.py": "import os\n"})
     script = Path(__file__).resolve().parents[1] / "src" / "depviz.py"
     result = subprocess.run(
         [sys.executable, "-B", str(script), "--path", "examples/project1/",
-         "--export", ".", "--format", "png"],
+         *output_options],
         cwd=str(root), capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "Generated graph:" in result.stdout
-    assert "dependency_graph.png" in result.stdout
-    assert result.stderr == ""
+    assert result.stdout == ""
+    assert "Generated graph:" in result.stderr
+    assert "dependency_graph.png" in result.stderr
     assert (root / "dependency_graph.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
@@ -64,7 +68,7 @@ def test_cli_reports_partial_analysis_and_still_exports(make_project, tmp_path, 
     assert result == 1
     output = capsys.readouterr()
     assert "Warning:" in output.err and "broken.py" in output.err
-    assert "import os" in output.out
+    assert output.out == ""
     assert '"valid.py" -> os' in (tmp_path / "partial.dot").read_text(encoding="utf-8")
 
 
@@ -78,7 +82,7 @@ def test_cli_reports_missing_graphviz_without_traceback(make_project, monkeypatc
     assert main(["--path", str(root), "--export", str(root / "graph")]) == 1
     output = capsys.readouterr()
     assert "Graphviz executable 'dot' was not found" in output.err
-    assert "--format dot" in output.err
+    assert "--output dot" in output.err
     assert "Traceback" not in output.err
 
 
@@ -119,6 +123,9 @@ def test_help_works_for_both_entrypoints_without_dependencies(entrypoint):
     assert "usage:" in result.stdout
     assert "--path" in result.stdout
     assert "--export" in result.stdout
+    assert "--output" in result.stdout
+    assert "--max-depth" in result.stdout
+    assert "--ignore" in result.stdout
     assert result.stderr == ""
 
 
@@ -134,6 +141,6 @@ def test_direct_execution_exports_from_another_working_directory(make_project):
         cwd=str(root), capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "Generated graph:" in result.stdout
-    assert result.stderr == ""
+    assert "Generated graph:" in result.stderr
+    assert result.stdout == ""
     assert '"main.py" -> os' in (root / "graph.dot").read_text(encoding="utf-8")
