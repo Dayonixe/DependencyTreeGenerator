@@ -6,7 +6,7 @@ a directed graph. It does not import the analysed code.
 
 | Module | Responsibility |
 | --- | --- |
-| `models.py` | Immutable `ImportReference(module, name, level, alias)`, `FunctionCall`, the `ModuleMap` type and `ProjectAnalysis` result. |
+| `models.py` | Immutable import, function-call, class and inter-class usage records, the `ModuleMap` type and `ProjectAnalysis` result. |
 | `parser.py` | Shared depth/ignore filtering, declared source encodings, AST extraction, diagnostics and canonical module indexing. |
 | `call_analyzer.py` | Parse each selected file once, track lexical bindings and resolve explicit calls through module exports. |
 | `utils.py` | Absolute/relative resolution and standard/installed module classification from names and metadata. |
@@ -15,6 +15,7 @@ a directed graph. It does not import the analysed code.
 | `depviz.py` | Parse/validate CLI options, route TXT/ASCII/DOT to stdout or files, export PNG and report status/errors on stderr. |
 | `desktop/data.py` | GUI graph data, display filtering and an iterative layout that condenses cycles. |
 | `desktop/graph.py` | Movable Qt nodes and directed edges, pan/zoom, selection and native PNG/SVG scene exports. |
+| `desktop/class_diagram.py` | Collapsible class cards, resolved inheritance arrows, layout, filtering and native PNG/SVG exports. |
 | `desktop/worker.py` | Cancellable background execution of the shared analyser; delivers immutable-by-convention result snapshots. |
 | `desktop/window.py` | Project controls, file tree, graph, calls table, source inspector, diagnostics and export dialogs. |
 | `depviz_gui.py` | Optional Qt entry point, packaged startup and smoke verification. |
@@ -37,6 +38,16 @@ branches retain only bindings on which all alternatives agree. Re-export resolut
 follows explicit imports to their function definitions, with guards for circular
 references. Only calls with known definitions in other selected files are emitted.
 This does not execute code or infer object types and dynamic call targets.
+
+The same AST scan records class definitions, their direct methods and their written
+base expressions. Base bindings resolve through local definitions, explicit imports,
+aliases and package re-exports; generic bases such as `Base[T]` resolve to `Base`.
+Calls made inside methods are also matched to known project classes, including direct
+construction and calls through a class attribute. Each resulting usage keeps its
+source class, method, expression and line. Calls from module scope and self-references
+do not create class-usage relations. Unresolved and external parents stay visible as
+labels but do not create project-class arrows. Nested class names retain their enclosing
+scope.
 
 ASCII walks the import graph iteratively, expanding each file once. Active ancestors
 are marked `[cycle]`; previously expanded targets are marked `[already shown]`.
@@ -71,9 +82,9 @@ checkpoints. A `QThread` owns analysis work; widgets are updated through queued 
 signals on the main thread. Cancelling or closing requests interruption and waits
 for the next checkpoint instead of terminating a thread during parsing.
 
-Display filters affect the Qt graph, not the analysis snapshot. The scene is bounded
-to 500 nodes and uses iterative strongly connected components followed by dependency
-levels. Directory selection, depth and ignore rules are shared with the CLI. PNG/SVG
-exports render the visible Qt scene directly; full DOT/TXT/ASCII exports reuse the
+Display filters affect the Qt views, not the analysis snapshot. The dependency scene
+is bounded to 500 nodes and the class scene to 300 cards; both use the shared iterative
+layout. Directory selection, depth and ignore rules are shared with the CLI. PNG/SVG
+exports render the active Qt scene directly; full DOT/TXT/ASCII exports reuse the
 existing report generators. The portable Windows build is a PyInstaller folder ZIP,
 with Qt libraries, example data, sources and third-party notices alongside the app.

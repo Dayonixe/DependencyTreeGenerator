@@ -1,11 +1,11 @@
-# Depviz Desktop 1.0.0
+# Depviz Desktop 1.1.0
 
 Depviz Desktop is a portable graphical explorer for Python project dependencies.
 It uses the same static import and inter-module call analysis as the CLI.
 
 ## Windows portable application
 
-Extract the entire `Depviz-1.0.0-windows-amd64-portable.zip` archive, then double-click
+Extract the entire `Depviz-1.1.0-windows-amd64-portable.zip` archive, then double-click
 `Depviz/Depviz.exe`. Keep the executable and its `_internal` directory together.
 Python, Qt and the required Python libraries are included. No installer, administrator
 account, network service or native Graphviz installation is needed to use the GUI.
@@ -26,7 +26,9 @@ desktop systems; this release's packaged executable is for Windows.
    l’analyse** interrupts it between files and during call-resolution checkpoints.
 4. Select files in the tree or graph. The inspector shows outgoing dependencies,
    incoming references and read-only source code. Select a relation to follow it.
-5. Use **Appels** to inspect resolved function calls. Double-click a row to open the
+5. Open **Classes** to inspect class inheritance. Classes start collapsed; click one
+   to display or hide its methods and open its source definition in the inspector.
+6. Use **Appels** to inspect resolved function calls. Double-click a row to open the
    function definition and highlight its line in the inspector's **Code** tab.
 
 The project root has the same meaning as `--path` in the CLI: select a Python import
@@ -52,6 +54,19 @@ Hover over an edge or inspector relation to see the import statements or call si
 Green nodes are project files, amber nodes are standard/installed modules, and red
 nodes are unresolved imports. Cyclic and disconnected components remain navigable.
 
+The **Classes** tab displays each Python class as a movable card. Hollow grey arrows
+point to parent classes. Purple dashed arrows show classes used by methods, including
+constructors and calls through a class such as `Formatter.create()`. Hover over a
+relation to see the source method, expression and line. Method compartments are collapsed
+initially to keep large diagrams compact; use **Tout déplier** and **Tout replier** to
+change every card. The first opening frames the complete diagram; later tab changes keep
+the chosen zoom. Moving a card, or opening and closing any method compartment, preserves
+every manual position. Use **Réorganiser** to restore the automatic layout. Selecting a
+class keeps it and its direct relations visible while unrelated cards and arrows are
+dimmed. The inspector remains on its current **Relations** or **Code** tab. The shared
+search field matches class names, source files, methods and base names. The class view
+renders at most 300 matching classes at once.
+
 The graph renders at most **500 nodes at a time**. A notice reports the number shown
 and the total matching the view filters. Narrow the search or select a file in the
 tree and enable **Voisinage** to explore larger projects. This display limit does not
@@ -62,8 +77,9 @@ to 500,000 characters per file, without modifying it.
 
 The **Exporter** menu offers:
 
-- **PNG / SVG**: the currently displayed graph, including view filters and moved
-  node positions. Qt renders these directly; no native `dot` executable is needed.
+- **PNG / SVG**: the dependency graph or class diagram currently displayed, including
+  expanded method compartments, view filters and moved node positions. Qt renders
+  these directly; no native `dot` executable is needed.
   Raster output is bounded to 8,192 pixels per side and 28 million pixels overall.
 - **DOT**: the complete analysed graph, using the existing CLI graph generator.
 - **TXT**: the complete flat import and function-call report.
@@ -127,6 +143,6 @@ $env:QT_QPA_PLATFORM = "offscreen"
 ```
 
 Desktop tests require the optional Qt dependencies. Existing native Graphviz tests
-still require `dot`; the new GUI exporters do not. The smoke-test directory contains
-the exported files, `window.png` and `smoke.json`. A frozen build can run the same
-check with `dist/Depviz/Depviz.exe --smoke-test output/portable-smoke`.
+still require `dot`; the GUI exporters do not. The smoke-test directory contains the
+dependency and class diagram exports, `window.png` and `smoke.json`. A frozen build can
+run the same check with `dist/Depviz/Depviz.exe --smoke-test output/portable-smoke`.

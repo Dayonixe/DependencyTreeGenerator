@@ -37,8 +37,8 @@ jobs:
           if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'Packaged application timed out' }
           if ($process.ExitCode -ne 0) { throw 'Packaged application failed' }
           $result = Get-Content (Join-Path $smokeOutput 'smoke.json') | ConvertFrom-Json
-          if ($result.files -ne 6 -or $result.calls -ne 4 -or $result.diagnostics.Count -ne 0) { throw 'Unexpected packaged analysis' }
-          foreach ($name in @('graph.png', 'graph.svg', 'graph.dot', 'graph.txt', 'tree.txt', 'window.png')) {
+          if ($result.files -ne 6 -or $result.calls -ne 4 -or $result.classes -ne 3 -or $result.class_usages -ne 1 -or $result.diagnostics.Count -ne 0) { throw 'Unexpected packaged analysis' }
+          foreach ($name in @('graph.png', 'graph.svg', 'classes.png', 'classes.svg', 'graph.dot', 'graph.txt', 'tree.txt', 'window.png')) {
             if ((Get-Item (Join-Path $smokeOutput $name)).Length -eq 0) { throw "Empty export: $name" }
           }
       - uses: actions/upload-artifact@v4

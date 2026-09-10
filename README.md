@@ -40,9 +40,11 @@ Text analysis uses only Python's standard library. DOT export requires the Pytho
 ### Graphical desktop application
 
 Depviz also provides a portable Windows desktop application: interactive dependency
-graph, search and display filters, project file tree, function-call navigation,
-read-only source inspector, cancellable background analysis and PNG/SVG/DOT/TXT/ASCII
-exports. The portable ZIP includes Python and Qt and needs no native Graphviz.
+graph, collapsible class diagram with inheritance, inter-class usages and methods,
+search and display
+filters, project file tree, function-call navigation, read-only source inspector,
+cancellable background analysis and PNG/SVG/DOT/TXT/ASCII exports. The portable ZIP
+includes Python and Qt and needs no native Graphviz.
 
 ```bash
 python -m pip install -r config/requirements-gui.txt
@@ -228,12 +230,16 @@ rendering. `build_dependency_graph()` exports it and returns the output filename
 Both accept an optional `calls` sequence.
 
 `analyze_project()` in `src.call_analyzer` parses each selected file once and returns
-a `ProjectAnalysis` containing `dependencies`, `module_map` and `calls`. Each
+a `ProjectAnalysis` containing `dependencies`, `module_map`, `calls`, `classes` and
+`class_usages`. Each
 `FunctionCall` records `source_file`, `caller`, `expression`, `lineno`, `col_offset`,
 `target_file`, `target_function` and `target_lineno`. Lines are one-based; the column
-is the AST's zero-based UTF-8 byte offset. It accepts the same `max_depth` and `ignore`
-filters. Pass the result to `format_ascii_report(analysis, project_path)` for an ASCII
-string, or pass its calls to `format_text_report(dependencies, project_path, calls)`.
+is the AST's zero-based UTF-8 byte offset. Each `ClassInfo` stores its source location,
+direct methods and base classes; internal inheritance and method-to-class usages are
+resolved through imports, relative imports, aliases and package re-exports. The analyser accepts the
+same `max_depth` and `ignore` filters. Pass the result to
+`format_ascii_report(analysis, project_path)` for an ASCII string, or pass its calls to
+`format_text_report(dependencies, project_path, calls)`.
 
 ### Tests
 

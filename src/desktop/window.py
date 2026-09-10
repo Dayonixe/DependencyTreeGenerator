@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from ..graph_generator import create_dependency_graph
 from ..output import format_ascii_report, format_text_report
 from . import VERSION
+from .class_diagram import ClassDiagramView
 from .data import ProjectGraph, file_id, select_graph
 from .graph import GraphView
 from .theme import STYLE, app_icon
@@ -45,6 +46,7 @@ class MainWindow(QMainWindow):
         self.selected = ""
         self._cancelled = False
         self._closing = False
+        self._class_fit_pending = False
         self._tree_items = {}
         self.setWindowTitle(f"Depviz {VERSION} — Explorateur de dépendances")
         self.setWindowIcon(app_icon())
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLE)
         self.setAcceptDrops(True)
         self._build_ui()
+        self.tabs.currentChanged.connect(self._tab_changed)
         self._shortcuts()
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
@@ -84,7 +87,7 @@ class MainWindow(QMainWindow):
         self.export_button = QPushButton("Exporter  ▾")
         self.export_button.setEnabled(False)
         menu = QMenu(self)
-        for title, kind in [("Image PNG — graphe affiché", "png"), ("Image SVG — graphe affiché", "svg"),
+        for title, kind in [("Image PNG — vue affichée", "png"), ("Image SVG — vue affichée", "svg"),
                             ("Graphe DOT — analyse complète", "dot"), ("Rapport texte — analyse complète", "txt"),
                             ("Arbre ASCII — analyse complète", "ascii")]:
             menu.addAction(title, lambda kind=kind: self.choose_export(kind))
@@ -188,7 +191,7 @@ class MainWindow(QMainWindow):
             self.stat_labels.append(value)
         layout.addLayout(stats)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Rechercher un fichier ou un module…  Ctrl+F")
+        self.search.setPlaceholderText("Rechercher un fichier, un module ou une classe…  Ctrl+F")
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
         filters = QHBoxLayout()
@@ -227,6 +230,42 @@ class MainWindow(QMainWindow):
         navigation.addWidget(self.zoom_label)
         graph_layout.addLayout(navigation)
         self.tabs.addTab(graph_page, "Graphe")
+
+        self.class_page = QWidget()
+        class_layout = QVBoxLayout(self.class_page)
+        class_layout.setContentsMargins(0, 0, 0, 0)
+        self.class_diagram = ClassDiagramView()
+        self.class_diagram.class_selected.connect(self._class_selected)
+        class_layout.addWidget(self.class_diagram, 1)
+        self.class_notice = label(
+            "Les classes sont repliées par défaut. Cliquez sur une classe pour voir ses méthodes.",
+            "muted", True,
+        )
+        class_layout.addWidget(self.class_notice)
+        class_navigation = QHBoxLayout()
+        class_navigation.addWidget(label(
+            "Trait gris : héritage · Pointillés violets : utilisation", "muted",
+        ))
+        class_navigation.addStretch()
+        for text, action in [
+            ("Tout replier", lambda: self.class_diagram.set_all_expanded(False)),
+            ("Tout déplier", lambda: self.class_diagram.set_all_expanded(True)),
+            ("−", lambda: self.class_diagram.zoom(1 / 1.2)),
+            ("+", lambda: self.class_diagram.zoom(1.2)),
+            ("Cadrer", self.class_diagram.fit_diagram),
+            ("Réorganiser", self.relayout_classes),
+        ]:
+            button = QPushButton(text)
+            button.clicked.connect(action)
+            class_navigation.addWidget(button)
+            if text == "Réorganiser":
+                self.class_relayout_button = button
+        self.class_zoom_label = label("100 %", "muted")
+        self.class_diagram.zoom_changed.connect(lambda value: self.class_zoom_label.setText(f"{value} %"))
+        class_navigation.addWidget(self.class_zoom_label)
+        class_layout.addLayout(class_navigation)
+        self.tabs.addTab(self.class_page, "Classes")
+
         self.calls_table = QTableWidget(0, 4)
         self.calls_table.setHorizontalHeaderLabels(["Fichier source", "Appel", "Définition", "Ligne"])
         self.calls_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -283,7 +322,7 @@ class MainWindow(QMainWindow):
 
     def _shortcuts(self):
         for sequence, callback in [("Ctrl+O", self.choose_project), ("Ctrl+R", self.start_analysis),
-                                   ("Ctrl+F", self.search.setFocus), ("Ctrl+0", self.graph.fit_graph),
+                                   ("Ctrl+F", self.search.setFocus), ("Ctrl+0", self.fit_current_view),
                                    ("Ctrl++", lambda: self.graph.zoom(1.2)),
                                    ("Ctrl+-", lambda: self.graph.zoom(1 / 1.2))]:
             action = QAction(self)
@@ -368,10 +407,12 @@ class MainWindow(QMainWindow):
             widget.setText(str(value))
         self.export_button.setEnabled(True)
         self.diagnostics.setPlainText("\n\n".join(result.diagnostics) or "Aucun diagnostic. Tous les fichiers sélectionnés ont été analysés.")
-        self.tabs.setTabText(2, f"Diagnostics ({len(result.diagnostics)})")
+        self.tabs.setTabText(3, f"Diagnostics ({len(result.diagnostics)})")
         self.files_heading.setText(f"03  /  FICHIERS · {values[0]}")
         self._populate_tree()
         self._populate_calls()
+        self.tabs.setTabText(1, f"Classes ({len(analysis.classes)})")
+        self._class_fit_pending = True
         self.refresh_graph(reset=True)
         self.select_node("")
         self.tabs.setCurrentIndex(0)
@@ -408,7 +449,7 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(text)
                 item.setToolTip(f"{call.caller} · {text}\nDouble-clic : définition à la ligne {call.target_lineno}")
                 self.calls_table.setItem(row, col, item)
-        self.tabs.setTabText(1, f"Appels ({len(calls)})")
+        self.tabs.setTabText(2, f"Appels ({len(calls)})")
 
     def refresh_graph(self, *args, reset=False):
         if not self.result:
@@ -417,6 +458,23 @@ class MainWindow(QMainWindow):
                                        calls=self.calls_check.isChecked(), external=self.external_check.isChecked(),
                                        query=self.search.text(), focus=self.selected if self.focus_check.isChecked() else None)
         self.graph.set_graph(visible, self.selected, reset=reset)
+        self.class_diagram.set_classes(
+            self.result.analysis.classes, self.result.analysis.class_usages,
+            self.search.text(), reset=reset,
+        )
+        class_total = self.class_diagram.matching_count
+        class_shown = len(self.class_diagram.cards)
+        if not self.result.analysis.classes:
+            self.class_notice.setText("Aucune classe Python trouvée dans les fichiers sélectionnés.")
+        elif class_total > class_shown:
+            self.class_notice.setText(
+                f"{class_shown} classes affichées sur {class_total} correspondances · "
+                "Limite de 300 : affinez la recherche."
+            )
+        else:
+            self.class_notice.setText(
+                f"{class_shown} classes · Cliquez sur une classe pour afficher ou masquer ses méthodes."
+            )
         shown = len(visible.nodes)
         message = f"{shown} nœuds · {len(visible.edges)} relations affichées"
         if total > shown:
@@ -431,9 +489,51 @@ class MainWindow(QMainWindow):
             self.calls_table.setRowHidden(row, bool(query) and query not in (
                 call.source_file + " " + call.target_file + " " + call.expression).replace("\\", "/").casefold())
 
+    def _class_selected(self, info):
+        source_path = info.file.replace("\\", "/")
+        self.node_title.setText("Classe " + info.name)
+        self.node_path.setText(f"{source_path} · ligne {info.lineno}")
+        self.outgoing.clear()
+        self.incoming.clear()
+        usages = [usage for usage in self.result.analysis.class_usages
+                  if usage.source_file == info.file and usage.source_class == info.name]
+        self.out_heading.setText("RELATIONS DE CLASSE · " + str(len(info.bases) + len(usages)))
+        for base in info.bases:
+            if base.target_file:
+                destination = " → " + base.target_file.replace("\\", "/") + ":" + (base.target_class or "?")
+            else:
+                destination = " · externe ou non résolue"
+            self.outgoing.addItem("HÉRITE DE · " + base.expression + destination)
+        for usage in usages:
+            target = usage.target_file.replace("\\", "/") + ":" + usage.target_class
+            self.outgoing.addItem(
+                f"UTILISE · {target} · {usage.source_method}() : "
+                f"{usage.expression}() · ligne {usage.lineno}"
+            )
+        self.in_heading.setText("MÉTHODES · " + str(len(info.methods)))
+        for method in info.methods:
+            self.incoming.addItem(f"{method.name}({method.signature}) · ligne {method.lineno}")
+        self.show_source(info.file, info.lineno)
+
     def relayout(self):
         self.refresh_graph(reset=True)
         self.graph.fit_graph()
+
+    def relayout_classes(self):
+        self.class_diagram.relayout()
+        self.class_diagram.fit_diagram()
+
+    def fit_current_view(self):
+        if self.tabs.currentWidget() is self.class_page:
+            self.class_diagram.fit_diagram()
+        else:
+            self.graph.fit_graph()
+
+    def _tab_changed(self, _index):
+        if (self.tabs.currentWidget() is self.class_page
+                and self._class_fit_pending and self.result is not None):
+            self._class_fit_pending = False
+            QTimer.singleShot(0, self.class_diagram.fit_diagram)
 
     def _tree_selection(self):
         items = self.tree.selectedItems()
@@ -549,7 +649,8 @@ class MainWindow(QMainWindow):
         try:
             analysis, root = self.result.analysis, self.result.root
             if kind in ("png", "svg"):
-                self.graph.export_image(temporary)
+                view = self.class_diagram if self.tabs.currentWidget() is self.class_page else self.graph
+                view.export_image(temporary)
             elif kind == "dot":
                 content = create_dependency_graph(analysis.dependencies, analysis.module_map, root,
                                                   "dot", analysis.calls).source
@@ -570,8 +671,10 @@ class MainWindow(QMainWindow):
             "3. Cliquez sur les fichiers pour explorer leurs relations.\n\n"
             "Molette : zoom · Glisser le fond : déplacer la vue · Glisser un nœud : le repositionner.\n"
             "Ctrl+F : recherche · Ctrl+0 : cadrage · Voisinage : relations directes du fichier sélectionné.\n"
+            "L’onglet Classes affiche l’héritage et les classes utilisées par les méthodes ; "
+            "cliquez sur une classe pour déplier ses méthodes.\n"
             "L’onglet Appels ouvre les définitions par double-clic.\n\n"
-            "PNG/SVG exportent le graphe affiché. DOT/TXT/ASCII exportent l’analyse complète.\n"
+            "PNG/SVG exportent le graphe ou le diagramme de classes affiché. DOT/TXT/ASCII exportent l’analyse complète.\n"
             "Le graphe affiche au maximum 500 nœuds à la fois ; utilisez la recherche et le voisinage.\n\n"
             "Analyse statique : le projet n’est pas exécuté. Les appels dynamiques, les imports * et les types "
             "d’objets ne sont pas inférés. La reconnaissance des bibliothèques installées dépend de "

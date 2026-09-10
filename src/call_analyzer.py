@@ -5,7 +5,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import os
 
-from .models import FunctionCall, ImportReference, ModuleMap, ProjectAnalysis
+from .models import (
+    ClassBase, ClassInfo, ClassMethod, ClassUsage, FunctionCall, ImportReference,
+    ModuleMap, ProjectAnalysis,
+)
 from .parser import (
     extract_imports_from_tree, iter_python_files, module_map_from_files, parse_python_file,
 )
@@ -14,6 +17,13 @@ from .utils import absolute_module_name, resolve_module_name
 
 @dataclass(frozen=True)
 class _Function:
+    file: str
+    name: str
+    line: int
+
+
+@dataclass(frozen=True)
+class _Class:
     file: str
     name: str
     line: int
@@ -47,6 +57,15 @@ class _ObservedCall:
     value: object
 
 
+@dataclass(frozen=True)
+class _ObservedClass:
+    file: str
+    name: str
+    line: int
+    bases: tuple[tuple[str, object], ...]
+    methods: tuple[ClassMethod, ...]
+
+
 def _expression(node: ast.AST | None, bindings: dict):
     if isinstance(node, ast.Name):
         return bindings.get(node.id)
@@ -54,6 +73,13 @@ def _expression(node: ast.AST | None, bindings: dict):
         value = _expression(node.value, bindings)
         return _Attribute(value, node.attr) if value is not None else None
     return None
+
+
+def _base_expression(node: ast.AST, bindings: dict):
+    """Resolve the class behind a generic base such as ``Base[T]``."""
+    while isinstance(node, ast.Subscript):
+        node = node.value
+    return _expression(node, bindings)
 
 
 def _merge(*branches: dict) -> dict:
@@ -136,6 +162,7 @@ class _Scanner:
     def __init__(self, file: str):
         self.file = file
         self.calls: list[_ObservedCall] = []
+        self.classes: list[_ObservedClass] = []
         self.globals: dict = {}
 
     def scan(self, tree: ast.Module) -> dict:
@@ -242,10 +269,32 @@ class _Scanner:
                 for expression in node.decorator_list + node.bases + [item.value for item in node.keywords]:
                     self._expr(expression, bindings, caller)
                 name = node.name if caller == "<module>" else caller + "." + node.name
+                methods = []
+                for member in node.body:
+                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        decorators = {
+                            ast.unparse(item).rsplit(".", 1)[-1] for item in member.decorator_list
+                            if isinstance(item, (ast.Name, ast.Attribute))
+                        }
+                        kind = (
+                            "property" if "property" in decorators
+                            else "classmethod" if "classmethod" in decorators
+                            else "staticmethod" if "staticmethod" in decorators
+                            else "async" if isinstance(member, ast.AsyncFunctionDef)
+                            else "method"
+                        )
+                        methods.append(ClassMethod(
+                            member.name, ast.unparse(member.args), member.lineno, kind,
+                        ))
+                self.classes.append(_ObservedClass(
+                    self.file, name, node.lineno,
+                    tuple((ast.unparse(base), _base_expression(base, bindings)) for base in node.bases),
+                    tuple(methods),
+                ))
                 class_bindings = bindings.copy()
                 # Methods inherit the enclosing scope, not the class namespace.
                 self._block(node.body, class_bindings, name, deferred)
-                bindings[node.name] = None
+                bindings[node.name] = _Class(self.file, name, node.lineno)
             elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
                 self._expr(node.value, bindings, caller)
                 if isinstance(node, ast.AnnAssign):
@@ -342,7 +391,7 @@ class _Resolver:
         return None
 
     def resolve(self, value, visiting=frozenset()):
-        if isinstance(value, _Function):
+        if isinstance(value, (_Function, _Class)):
             return value
         if isinstance(value, _Attribute):
             base = self.resolve(value.value, visiting)
@@ -358,6 +407,15 @@ class _Resolver:
             return self._member(_Module(absolute, frozenset({absolute})), ref.name, visiting, True)
         return None
 
+    def class_owner(self, value):
+        """Resolve a called class, including calls such as ``Class.factory()``."""
+        while value is not None:
+            target = self.resolve(value)
+            if isinstance(target, _Class):
+                return target
+            value = value.value if isinstance(value, _Attribute) else None
+        return None
+
 
 def analyze_project(
     project_path: str,
@@ -370,6 +428,7 @@ def analyze_project(
     dependencies = {}
     exports = {}
     observed = {}
+    observed_classes = []
     for path in iter_python_files(project_path, max_depth, ignore):
         relative = os.path.relpath(path, project_path)
         if on_progress is not None:
@@ -380,10 +439,14 @@ def analyze_project(
             scanner = _Scanner(relative)
             exports[relative] = scanner.scan(tree)
             observed[relative] = scanner.calls
+            observed_classes.extend(scanner.classes)
 
     module_map = module_map_from_files(project_path, list(dependencies))
     resolver = _Resolver(module_map, exports, project_path)
-    calls = []
+    calls, class_usages = [], []
+    classes_by_file = {}
+    for item in observed_classes:
+        classes_by_file.setdefault(item.file, []).append(item)
     for source, observations in observed.items():
         if on_progress is not None:
             on_progress(source)
@@ -394,5 +457,30 @@ def analyze_project(
                     source, call.caller, call.expression, call.line,
                     target.file, target.name, target.line, call.column,
                 ))
+            target_class = resolver.class_owner(call.value)
+            source_classes = [
+                item for item in classes_by_file.get(source, ())
+                if call.caller.startswith(item.name + ".")
+            ]
+            if target_class is not None and source_classes:
+                source_class = max(source_classes, key=lambda item: len(item.name))
+                if (source_class.file, source_class.name) != (target_class.file, target_class.name):
+                    class_usages.append(ClassUsage(
+                        source, source_class.name, call.caller[len(source_class.name) + 1:],
+                        call.expression, call.line, target_class.file, target_class.name,
+                        call.column,
+                    ))
     calls.sort(key=lambda call: (call.source_file, call.lineno, call.col_offset))
-    return ProjectAnalysis(dependencies, module_map, calls)
+    class_usages.sort(key=lambda usage: (usage.source_file, usage.lineno, usage.col_offset))
+    classes = []
+    for item in observed_classes:
+        bases = []
+        for expression, value in item.bases:
+            target = resolver.resolve(value)
+            if isinstance(target, _Class):
+                bases.append(ClassBase(expression, target.file, target.name))
+            else:
+                bases.append(ClassBase(expression))
+        classes.append(ClassInfo(item.file, item.name, item.line, tuple(bases), item.methods))
+    classes.sort(key=lambda item: (item.file, item.lineno, item.name))
+    return ProjectAnalysis(dependencies, module_map, calls, classes, class_usages)

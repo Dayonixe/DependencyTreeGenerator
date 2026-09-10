@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 ModuleMap = dict[str, list[str]]
@@ -50,8 +50,54 @@ class FunctionCall:
     col_offset: int = 0
 
 
+@dataclass(frozen=True)
+class ClassMethod:
+    """A method declared directly in a Python class."""
+
+    name: str
+    signature: str
+    lineno: int
+    kind: str = "method"
+
+
+@dataclass(frozen=True)
+class ClassBase:
+    """A displayed base expression and its optional internal class target."""
+
+    expression: str
+    target_file: str | None = None
+    target_class: str | None = None
+
+
+@dataclass(frozen=True)
+class ClassInfo:
+    """A class definition extracted statically from a selected source file."""
+
+    file: str
+    name: str
+    lineno: int
+    bases: tuple[ClassBase, ...] = ()
+    methods: tuple[ClassMethod, ...] = ()
+
+
+@dataclass(frozen=True)
+class ClassUsage:
+    """A class referenced by a method call, with both endpoints resolved."""
+
+    source_file: str
+    source_class: str
+    source_method: str
+    expression: str
+    lineno: int
+    target_file: str
+    target_class: str
+    col_offset: int = 0
+
+
 @dataclass
 class ProjectAnalysis:
     dependencies: dict[str, list[ImportReference]]
     module_map: ModuleMap
     calls: list[FunctionCall]
+    classes: list[ClassInfo] = field(default_factory=list)
+    class_usages: list[ClassUsage] = field(default_factory=list)

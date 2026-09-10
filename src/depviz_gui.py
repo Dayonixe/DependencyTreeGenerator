@@ -67,10 +67,18 @@ def main(argv=None):
                 window.graph.fit_graph()
                 for kind in ("png", "svg", "dot", "txt", "ascii"):
                     window.export_to(str(output / ("graph." + kind if kind != "ascii" else "tree.txt")), kind)
+                window.tabs.setCurrentWidget(window.class_page)
+                window.class_diagram.set_all_expanded(True)
+                window.class_diagram.fit_diagram()
+                app.processEvents()
+                for kind in ("png", "svg"):
+                    window.export_to(str(output / ("classes." + kind)), kind)
                 window.grab().save(str(output / "window.png"))
                 analysis = window.result.analysis
                 report = {"files": len(analysis.dependencies), "calls": len(analysis.calls),
-                          "nodes": len(window.graph.nodes), "diagnostics": window.result.diagnostics}
+                          "classes": len(analysis.classes), "class_usages": len(analysis.class_usages),
+                          "nodes": len(window.graph.nodes),
+                          "diagnostics": window.result.diagnostics}
                 (output / "smoke.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
                 app.exit(0)
             except Exception as error:

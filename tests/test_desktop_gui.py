@@ -13,6 +13,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.call_analyzer import analyze_project
+from src.desktop.class_diagram import class_id
 from src.desktop.data import build_project_graph, file_id
 from src.desktop.window import MainWindow
 from src.desktop.theme import configure_application
@@ -34,7 +35,12 @@ def gui_project(make_project):
     return make_project({
         "app.py": "from pkg import run\nimport os\ndef main():\n    run()\n",
         "pkg/__init__.py": "from .tools import run\n",
-        "pkg/tools.py": "def run():\n    pass\n",
+        "pkg/tools.py": ("def run():\n    pass\n\n"
+                         "class Service:\n    def execute(self, value):\n        return value\n\n"
+                         "    def create_worker(self):\n        return Worker()\n\n"
+                         "class Worker(Service):\n    @staticmethod\n    def name():\n        return 'worker'\n\n"
+                         "    async def execute_async(self, value):\n        return value\n\n"
+                         "class Standalone:\n    pass\n"),
         "isolated.py": "",
     })
 
@@ -72,6 +78,10 @@ def test_worker_ui_matches_shared_analysis(window, gui_project):
     assert window.result.analysis == expected
     assert [label.text() for label in window.stat_labels] == ["4", "3", "1", "0"]
     assert window.calls_table.rowCount() == 1
+    assert window.tabs.tabText(1) == "Classes (3)"
+    assert len(window.class_diagram.cards) == 3
+    assert len(window.class_diagram.edges) == 2
+    assert {edge.kind for edge in window.class_diagram.edges} == {"inheritance", "usage"}
     assert len(window.graph.nodes) == 4
     assert window.export_button.isEnabled() and window.analyze_button.isEnabled()
     assert not window.progress.isVisible()
@@ -108,7 +118,7 @@ def test_tree_and_call_navigation_open_definition(window):
     window.tree.setCurrentItem(window._tree_items[file_id("app.py")])
     assert window.selected == file_id("app.py")
     assert "from pkg import run" in window.source.toPlainText()
-    window.tabs.setCurrentIndex(1)
+    window.tabs.setCurrentIndex(2)
     QTest.qWait(50)
     rect = window.calls_table.visualItemRect(window.calls_table.item(0, 0))
     assert rect.isValid()
@@ -118,6 +128,75 @@ def test_tree_and_call_navigation_open_definition(window):
     assert "def run():" in window.source.toPlainText()
     assert window.detail_tabs.currentIndex() == 1
     assert window.source.textCursor().blockNumber() == 0
+
+
+def test_class_diagram_is_collapsed_and_opens_methods(window, app):
+    window.class_diagram.resetTransform()
+    window.class_diagram.scale(2.4, 2.4)
+    window.tabs.setCurrentWidget(window.class_page)
+    app.processEvents()
+    fitted_zoom = window.class_diagram.transform().m11()
+    assert fitted_zoom <= 1.3
+    window.class_diagram.zoom(1.2)
+    chosen_zoom = window.class_diagram.transform().m11()
+    window.tabs.setCurrentIndex(0)
+    window.tabs.setCurrentWidget(window.class_page)
+    app.processEvents()
+    assert window.class_diagram.transform().m11() == pytest.approx(chosen_zoom)
+
+    service = window.class_diagram.cards[class_id("pkg/tools.py", "Service")]
+    worker = window.class_diagram.cards[class_id("pkg/tools.py", "Worker")]
+    standalone = window.class_diagram.cards[class_id("pkg/tools.py", "Standalone")]
+    assert not service.expanded and not worker.expanded and not standalone.expanded
+    service.setPos(service.pos() + QPointF(80, 45))
+    moved_positions = {key: QPointF(card.pos()) for key, card in window.class_diagram.cards.items()}
+    collapsed_height = worker.height
+
+    window.detail_tabs.setCurrentIndex(0)
+    point = window.class_diagram.mapFromScene(worker.sceneBoundingRect().center())
+    QTest.mouseClick(window.class_diagram.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert worker.expanded
+    assert worker.height > collapsed_height
+    assert {key: card.pos() for key, card in window.class_diagram.cards.items()} == moved_positions
+    assert service.opacity() == 1
+    assert worker.opacity() == 1
+    assert standalone.opacity() == pytest.approx(.38)
+    assert all(edge.opacity() == 1 for edge in window.class_diagram.edges)
+    assert "Classe Worker" == window.node_title.text()
+    assert window.out_heading.text() == "RELATIONS DE CLASSE · 1"
+    assert window.in_heading.text() == "MÉTHODES · 2"
+    assert window.source.textCursor().blockNumber() == 10
+    assert window.detail_tabs.currentIndex() == 0
+
+    window.detail_tabs.setCurrentIndex(1)
+    window._class_selected(service.info)
+    assert window.out_heading.text() == "RELATIONS DE CLASSE · 1"
+    assert "UTILISE" in window.outgoing.item(0).text()
+    assert "Worker" in window.outgoing.item(0).text()
+    assert window.detail_tabs.currentIndex() == 1
+
+    window.class_diagram.set_all_expanded(True)
+    assert all(card.expanded for card in window.class_diagram.cards.values())
+    assert {key: card.pos() for key, card in window.class_diagram.cards.items()} == moved_positions
+    window.class_diagram.set_all_expanded(False)
+    assert all(not card.expanded for card in window.class_diagram.cards.values())
+    assert {key: card.pos() for key, card in window.class_diagram.cards.items()} == moved_positions
+
+    expected = window.class_diagram._automatic_positions()[class_id("pkg/tools.py", "Service")]
+    QTest.mouseClick(window.class_relayout_button, Qt.MouseButton.LeftButton)
+    assert service.pos() == expected
+
+
+@pytest.mark.parametrize("kind", ["png", "svg"])
+def test_class_diagram_export_uses_the_displayed_state(window, gui_project, kind):
+    window.tabs.setCurrentWidget(window.class_page)
+    window.class_diagram.set_all_expanded(True)
+    target = gui_project / ("classes." + kind)
+    window.export_to(str(target), kind)
+    if kind == "png":
+        assert not QImage(str(target)).isNull()
+    else:
+        assert b"<svg" in target.read_bytes()
 
 
 @pytest.mark.parametrize("kind", ["png", "svg", "dot", "txt", "ascii"])
@@ -206,6 +285,8 @@ def test_empty_project_and_large_display_limit(window, gui_project):
     wait_for(lambda: window.job is None)
     assert window.result.analysis.dependencies == {}
     assert not window.graph.nodes
+    assert not window.class_diagram.cards
+    assert window.tabs.tabText(1) == "Classes (0)"
     assert window.stat_labels[0].text() == "0"
     from src.models import ProjectAnalysis
     analysis = ProjectAnalysis({f"file{i}.py": [] for i in range(510)}, {}, [])
