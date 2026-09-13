@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 from ..models import ProjectAnalysis
-from ..utils import is_standard_or_external, resolve_import
+from ..utils import is_external_reference, resolve_import
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ def build_project_graph(analysis: ProjectAnalysis, root: str) -> ProjectGraph:
             if target in analysis.dependencies:
                 target_id = file_id(target)
             else:
-                known = is_standard_or_external(ref.base)
+                known = is_external_reference(ref)
                 label = ref.module if known else ref.target
                 kind = "external" if known else "unknown"
                 target_id = f"{kind}:{label}"

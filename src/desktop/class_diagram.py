@@ -86,7 +86,7 @@ class ClassCard(QGraphicsObject):
         file = painter.fontMetrics().elidedText(self.info.file.replace("\\", "/"), Qt.TextElideMode.ElideMiddle, 225)
         painter.drawText(QRectF(38, 36, 225, 17), Qt.AlignmentFlag.AlignVCenter, file)
         bases = ", ".join(base.expression for base in self.info.bases)
-        bases = "hérite de " + bases if bases else "Aucune classe parente"
+        bases = "hérite de " + bases if bases else "Aucun parent"
         bases = painter.fontMetrics().elidedText(bases, Qt.TextElideMode.ElideRight, 225)
         painter.drawText(QRectF(38, 53, 225, 17), Qt.AlignmentFlag.AlignVCenter, bases)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -108,7 +108,10 @@ class ClassCard(QGraphicsObject):
                 painter.drawText(QRectF(15, self.HEADER_HEIGHT + 7, self.WIDTH - 30, self.METHOD_HEIGHT),
                                  Qt.AlignmentFlag.AlignVCenter, "(aucune méthode)")
             for index, method in enumerate(methods):
-                prefix = {"classmethod": "C", "staticmethod": "S", "property": "P", "async": "A"}.get(method.kind, "ƒ")
+                prefix = {
+                    "classmethod": "C", "staticmethod": "S", "property": "P", "async": "A",
+                    "procedure": "P", "function": "F",
+                }.get(method.kind, "ƒ")
                 text = f"{prefix}  {method.name}({method.signature})"
                 text = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, self.WIDTH - 28)
                 painter.drawText(QRectF(15, self.HEADER_HEIGHT + 7 + index * self.METHOD_HEIGHT,

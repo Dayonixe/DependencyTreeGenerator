@@ -24,6 +24,13 @@ def is_standard_or_external(module_name: str) -> bool:
     return root in sys.stdlib_module_names or root in _installed_module_names()
 
 
+def is_external_reference(reference: ImportReference) -> bool:
+    """Use analyser-provided classification, falling back to Python metadata."""
+    if reference.external is not None:
+        return reference.external
+    return is_standard_or_external(reference.base)
+
+
 def absolute_module_name(
     module_name: str,
     current_file: str | None,
@@ -79,6 +86,8 @@ def resolve_import(
     project_path: str | None = None,
 ) -> str | None:
     """Resolve a from-import to its submodule, or to the module owning its symbol."""
+    if reference.resolved_file is not None:
+        return reference.resolved_file
     if reference.name not in (None, "*"):
         target = resolve_module_name(
             reference.target, module_map, current_file, project_path

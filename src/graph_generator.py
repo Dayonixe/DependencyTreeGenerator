@@ -5,7 +5,7 @@ from graphviz import Digraph
 
 from .models import FunctionCall, ImportReference, ModuleMap
 from .output import prepare_output_stem
-from .utils import is_standard_or_external, resolve_import
+from .utils import is_external_reference, resolve_import
 
 
 INTERNAL_STYLE = {
@@ -48,7 +48,7 @@ def create_dependency_graph(
                 resolved = file_id(internal)
                 node_style = INTERNAL_STYLE
                 edge_color = "black"
-            elif is_standard_or_external(reference.base):
+            elif is_external_reference(reference):
                 resolved = reference.module
                 node_style = EXTERNAL_STYLE
                 edge_color = "#787878"

@@ -6,7 +6,7 @@ import warnings
 
 from PySide6.QtCore import QThread, Signal
 
-from ..call_analyzer import analyze_project
+from ..project_analyzer import analyze_project
 from ..models import ProjectAnalysis
 from ..parser import AnalysisWarning
 from .data import ProjectGraph, build_project_graph

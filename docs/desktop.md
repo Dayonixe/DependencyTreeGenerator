@@ -1,7 +1,8 @@
 # Depviz Desktop 1.1.0
 
-Depviz Desktop is a portable graphical explorer for Python project dependencies.
-It uses the same static import and inter-module call analysis as the CLI.
+Depviz Desktop is a portable graphical explorer for Python and Ada project dependencies.
+It detects the project language and uses the same static dependency and inter-unit call
+analysis as the CLI.
 
 ## Windows portable application
 
@@ -17,8 +18,8 @@ desktop systems; this release's packaged executable is for Windows.
 
 ## Explore a project
 
-1. Click **Choisir un dossier…**, drop a project folder onto the window, or click
-   **Ouvrir l’exemple** to load the included package example.
+1. Click **Choisir un dossier…**, drop a project folder onto the window, or open one
+   of the included Python and Ada examples. The header shows the detected language.
 2. Choose the directory depth: **Illimitée** visits all selected subdirectories;
    **0** visits only the root. Enter one exclusion pattern per line. The syntax
    matches the CLI's `--ignore`, including `tests`, `pkg/generated.py` and `**/test_*.py`.
@@ -32,8 +33,9 @@ desktop systems; this release's packaged executable is for Windows.
    function definition and highlight its line in the inspector's **Code** tab.
 
 The project root has the same meaning as `--path` in the CLI: select a Python import
-root, or a package directory with `__init__.py`. The analysed code is never imported
-or executed. Existing CLI commands remain available.
+root/package directory, or a directory containing Ada `.ads`/`.adb`/`.ada` sources. The
+analysed code is never imported, executed or compiled. Existing CLI commands remain
+available, including `--language` when automatic detection needs an override.
 
 ## Graph controls
 
@@ -54,9 +56,10 @@ Hover over an edge or inspector relation to see the import statements or call si
 Green nodes are project files, amber nodes are standard/installed modules, and red
 nodes are unresolved imports. Cyclic and disconnected components remain navigable.
 
-The **Classes** tab displays each Python class as a movable card. Hollow grey arrows
-point to parent classes. Purple dashed arrows show classes used by methods, including
-constructors and calls through a class such as `Formatter.create()`. Hover over a
+The **Classes** tab displays each Python class or Ada tagged type as a movable card.
+Hollow grey arrows point to parent classes/types. Purple dashed arrows show classes used
+by methods or Ada primitive operations, including constructors and calls through a
+class such as `Formatter.create()`. Hover over a
 relation to see the source method, expression and line. Method compartments are collapsed
 initially to keep large diagrams compact; use **Tout déplier** and **Tout replier** to
 change every card. The first opening frames the complete diagram; later tab changes keep
@@ -66,6 +69,11 @@ class keeps it and its direct relations visible while unrelated cards and arrows
 dimmed. The inspector remains on its current **Relations** or **Code** tab. The shared
 search field matches class names, source files, methods and base names. The class view
 renders at most 300 matching classes at once.
+
+For Ada, `with` clauses form graph dependencies, `.adb` package bodies link to their
+`.ads` specifications, tagged type extensions form inheritance relations, and resolved
+qualified or `use`-visible subprogram calls appear in **Appels**. `.gpr` files help
+language detection but their build attributes are not interpreted.
 
 The graph renders at most **500 nodes at a time**. A notice reports the number shown
 and the total matching the view filters. Narrow the search or select a file in the
@@ -103,6 +111,7 @@ Python 3.10+:
 python -m pip install -r config/requirements-gui.txt
 python -m src.depviz_gui
 python src/depviz_gui.py --path examples/advanced
+python src/depviz_gui.py --path examples/ada_demo
 ```
 
 On Windows, `launch_gui.pyw` is also a double-click entry point when Python and the
@@ -143,6 +152,6 @@ $env:QT_QPA_PLATFORM = "offscreen"
 ```
 
 Desktop tests require the optional Qt dependencies. Existing native Graphviz tests
-still require `dot`; the GUI exporters do not. The smoke-test directory contains the
-dependency and class diagram exports, `window.png` and `smoke.json`. A frozen build can
+still require `dot`; the GUI exporters do not. The smoke-test directory contains Python
+and Ada dependency/class exports, window captures and `smoke.json`. A frozen build can
 run the same check with `dist/Depviz/Depviz.exe --smoke-test output/portable-smoke`.

@@ -6,12 +6,15 @@ ModuleMap = dict[str, list[str]]
 
 @dataclass(frozen=True)
 class ImportReference:
-    """An import statement, retaining the distinction between modules and names."""
+    """A source dependency, retaining Python import details when applicable."""
 
     module: str
     name: str | None = None
     level: int = 0
     alias: str | None = None
+    resolved_file: str | None = None
+    external: bool | None = None
+    display: str | None = None
 
     @property
     def binding(self) -> str:
@@ -29,6 +32,8 @@ class ImportReference:
         return f"{self.base}{separator}{self.name}"
 
     def __str__(self) -> str:
+        if self.display is not None:
+            return self.display
         if self.name is None:
             statement = f"import {self.module}"
         else:
@@ -52,7 +57,7 @@ class FunctionCall:
 
 @dataclass(frozen=True)
 class ClassMethod:
-    """A method declared directly in a Python class."""
+    """A method or primitive operation attached to a class-like type."""
 
     name: str
     signature: str
@@ -101,3 +106,4 @@ class ProjectAnalysis:
     calls: list[FunctionCall]
     classes: list[ClassInfo] = field(default_factory=list)
     class_usages: list[ClassUsage] = field(default_factory=list)
+    language: str = "python"

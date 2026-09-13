@@ -5,6 +5,9 @@ Team : Théo Pirouelle
 <a href="https://www.python.org/">
   <img src="https://img.shields.io/badge/language-python-blue?style=flat-square" alt="laguage-python" />
 </a>
+<a href="https://www.adaic.org/">
+  <img src="https://img.shields.io/badge/analyzed-Ada-7f5ab6?style=flat-square" alt="analyzed-Ada" />
+</a>
 
 ![TestsResult](https://github.com/Dayonixe/DependencyTreeGenerator/actions/workflows/python-tests.yml/badge.svg)
 
@@ -30,7 +33,8 @@ On Debian/Ubuntu, install it with `sudo apt install graphviz`. On Windows, insta
 Graphviz Windows package and add its `bin` directory to `PATH`. Check the installation
 with `dot -V` from a new terminal.
 
-Text analysis uses only Python's standard library. DOT export requires the Python
+Text analysis uses only Python's standard library and does not require an Ada compiler.
+DOT export requires the Python
 `graphviz` package, but does not require the native `dot` executable.
 
 ---
@@ -39,7 +43,8 @@ Text analysis uses only Python's standard library. DOT export requires the Pytho
 
 ### Graphical desktop application
 
-Depviz also provides a portable Windows desktop application: interactive dependency
+Depviz also provides a portable Windows desktop application for Python and Ada projects:
+interactive dependency
 graph, collapsible class diagram with inheritance, inter-class usages and methods,
 search and display
 filters, project file tree, function-call navigation, read-only source inspector,
@@ -49,6 +54,7 @@ includes Python and Qt and needs no native Graphviz.
 ```bash
 python -m pip install -r config/requirements-gui.txt
 python -m src.depviz_gui --path examples/advanced
+python -m src.depviz_gui --path examples/ada_demo
 ```
 
 See the [desktop guide](docs/desktop.md) for controls, portable builds and tests.
@@ -69,14 +75,15 @@ export paths are relative to the current working directory.
 
 | Option | Behaviour |
 | --- | --- |
-| `--path PATH` | Required Python import root or package directory. |
+| `--path PATH` | Required Python import root, package directory or Ada source directory. |
+| `--language {auto,python,ada}` | Detect the language automatically by default, or force one analyser. |
 | `--output {dot,png,txt,ascii}` | TXT by default. TXT/ASCII/DOT go to stdout; PNG creates `dependency_graph.png` in the current directory. |
 | `--max-depth N` | Non-negative subdirectory depth: 0 = root files, 1 = root and immediate subdirectories. Omit for unlimited depth. |
 | `--ignore PATTERN [PATTERN ...]` | Exclude file/directory names, paths or globs. Accepts multiple values and repeated occurrences. |
 | `--export PATH` | Write the selected format to a directory or filename without extension instead of stdout/the default PNG destination. |
 | `--format {png,svg,pdf,dot}` | Compatibility option for existing commands. Cannot be combined with `--output`. |
 
-Analyse two directory levels, excluding tests and generated Python files:
+Analyse two directory levels, excluding tests and generated source files:
 
 ```bash
 python3 src/depviz.py --path . --output txt --max-depth 2 --ignore tests "generated_*.py"
@@ -111,6 +118,34 @@ Existing commands such as `--export . --format png` continue to work.
 For compatibility, `--export` alone still selects PNG; use `--output txt`
 explicitly when saving a text report.
 
+### Language detection and Ada projects
+
+Depviz selects Python or Ada from the source files below the chosen root. Python uses
+`.py`; Ada uses package specifications (`.ads`), bodies (`.adb`) and combined `.ada`
+sources. A `.gpr` file is
+also an Ada hint and breaks a source-count tie in Ada's favour. In a mixed tree the
+analyser with the most source files is selected and a diagnostic reports the decision. Use
+`--language python` or `--language ada` to override it from the CLI. The desktop header
+shows the detected language.
+
+For Ada, context `with` clauses form dependency edges. Package bodies are also linked
+to their `.ads` specifications, and specifications are preferred as the target of a
+unit dependency. Standard runtime roots such as `Ada`, `Interfaces`, `System` and
+`GNAT` are shown as external dependencies. Unit and identifier matching is
+case-insensitive. The selected directory is walked recursively; `.gpr` source-directory
+attributes are currently used as a language hint rather than as build configuration.
+
+The **Classes** view represents tagged types, interfaces and tagged type extensions.
+Primitive procedures/functions are attached to a type when their profile mentions it.
+Type extensions create inheritance arrows. Calls to a primitive operation of another
+tagged type create class-usage arrows when both controlling types can be resolved.
+
+Inter-unit Ada calls resolve expanded names such as `Geometry.Draw (...)`, parameterless
+calls such as `Factory.Create`, and unqualified calls made visible by `use Package;`.
+The analyser is static and compiler-independent. It intentionally leaves ambiguous
+overloads, object-prefixed dispatch, generic instantiations, renames and targets that
+require Ada semantic/type analysis unresolved.
+
 ### Depth and exclusions
 
 Depth counts source directories, not dependency-graph hops. For example,
@@ -137,7 +172,7 @@ are outside the selected files. Those targets are unresolved in the graph unless
 recognised as standard or installed dependencies. Excluded files have no source
 nodes or outgoing edges. An empty selection is a successful empty report.
 
-### Resolution and diagnostics
+### Python resolution and diagnostics
 
 `--path` defines the import root. For `repo/src/my_package`, choose `--path repo/src`
 when imports start with `my_package`. You can also select a package directory that
@@ -172,9 +207,9 @@ an `__init__.py` has no single file node, although its concrete submodules resol
 
 ### Function calls and ASCII view
 
-The analyser follows explicit calls to functions defined in other selected project
-files, including `module.function()`, imported functions, aliases and simple alias
-assignments. Relative imports and explicit re-exports through `__init__.py` resolve
+For Python, the analyser follows explicit calls to functions defined in other selected
+project files, including `module.function()`, imported functions, aliases and simple
+alias assignments. Relative imports and explicit re-exports through `__init__.py` resolve
 to the file containing the function definition. Function-local imports, parameters
 and local assignments are taken into account when resolving a name.
 
@@ -214,7 +249,7 @@ inter-module call list. Ambiguous bindings after conditional statements are omit
 runtime mutation and execution order can still affect the actual targets. Calls to
 excluded files are omitted because those definitions are outside the analysis index.
 
-### Python API
+### Analysis API
 
 `extract_imports_from_file()` now returns `ImportReference` objects instead of strings.
 Each reference stores `module`, `name` (for a from-import), `level` (relative depth)
@@ -229,9 +264,11 @@ Both `collect_all_dependencies()` and `build_module_map()` accept
 rendering. `build_dependency_graph()` exports it and returns the output filename.
 Both accept an optional `calls` sequence.
 
-`analyze_project()` in `src.call_analyzer` parses each selected file once and returns
-a `ProjectAnalysis` containing `dependencies`, `module_map`, `calls`, `classes` and
-`class_usages`. Each
+`analyze_project()` in `src.project_analyzer` detects and dispatches the project language.
+`analyze_project()` in `src.call_analyzer` remains the Python-specific entry point, and
+`analyze_ada_project()` in `src.ada_analyzer` is the Ada-specific entry point. They return
+a `ProjectAnalysis` containing `dependencies`, `module_map`, `calls`, `classes`,
+`class_usages` and `language`. Each
 `FunctionCall` records `source_file`, `caller`, `expression`, `lineno`, `col_offset`,
 `target_file`, `target_function` and `target_lineno`. Lines are one-based; the column
 is the AST's zero-based UTF-8 byte offset. Each `ClassInfo` stores its source location,
@@ -247,10 +284,11 @@ same `max_depth` and `ignore` filters. Pass the result to
 python -m pytest tests/
 ```
 
-The tests cover exact import destinations and graph edges, package discovery,
+The tests cover Python imports and Ada `with` clauses, exact graph edges, package discovery,
 side-effect-free analysis, call aliases and scopes, relative re-exports, ASCII cycles
-and shared branches, encodings, depth limits, ignore patterns, clean stdout/stderr,
-argument validation, diagnostics and CLI exports.
+and shared branches, Ada tagged types and inter-unit calls, language detection, encodings,
+depth limits, ignore patterns, clean stdout/stderr, argument validation, diagnostics and
+CLI/GUI exports.
 PNG/SVG/PDF integration tests are skipped locally when `dot` is unavailable.
 CI installs and checks Graphviz before running tests on Linux (Python 3.10–3.12)
 and Windows (Python 3.12).

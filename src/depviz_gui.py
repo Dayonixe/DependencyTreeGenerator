@@ -13,7 +13,7 @@ if __name__ == "__main__" and not __package__:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Depviz — explorateur graphique de dépendances Python.")
+    parser = argparse.ArgumentParser(description="Depviz — explorateur graphique de dépendances Python et Ada.")
     parser.add_argument("--path", help="Projet à ouvrir au démarrage.")
     parser.add_argument("--smoke-test", metavar="DIRECTORY", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -21,7 +21,7 @@ def main(argv=None):
         from PySide6.QtCore import QTimer
         from PySide6.QtGui import QFontDatabase
         from PySide6.QtWidgets import QApplication
-        from .desktop.window import MainWindow, example_path
+        from .desktop.window import MainWindow, ada_example_path, example_path
         from .desktop.theme import configure_application
     except ImportError as error:
         message = ("L’interface graphique nécessite les dépendances Qt.\n"
@@ -47,42 +47,55 @@ def main(argv=None):
         # No project code is executed. Used by the build workflow and GUI tests.
         output = Path(args.smoke_test).resolve()
         output.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + 60
+        state = {"stage": "python", "deadline": time.monotonic() + 60, "report": {}}
         timer = QTimer(window)
 
         def smoke():
             if window.job:
-                if time.monotonic() < deadline:
+                if time.monotonic() < state["deadline"]:
                     return
                 (output / "smoke.json").write_text(json.dumps({"error": "analysis timeout"}), encoding="utf-8")
                 window.cancel_analysis()
+                timer.stop()
                 app.exit(1)
                 return
-            timer.stop()
             try:
                 if window.result is None:
                     raise RuntimeError("No analysis result")
                 key = next(iter(window.graph.nodes), "")
                 window.select_node(key)
                 window.graph.fit_graph()
+                prefix = "" if state["stage"] == "python" else "ada-"
                 for kind in ("png", "svg", "dot", "txt", "ascii"):
-                    window.export_to(str(output / ("graph." + kind if kind != "ascii" else "tree.txt")), kind)
+                    name = prefix + ("graph." + kind if kind != "ascii" else "tree.txt")
+                    window.export_to(str(output / name), kind)
                 window.tabs.setCurrentWidget(window.class_page)
                 window.class_diagram.set_all_expanded(True)
                 window.class_diagram.fit_diagram()
                 app.processEvents()
                 for kind in ("png", "svg"):
-                    window.export_to(str(output / ("classes." + kind)), kind)
-                window.grab().save(str(output / "window.png"))
+                    window.export_to(str(output / (prefix + "classes." + kind)), kind)
+                window.grab().save(str(output / (prefix + "window.png")))
                 analysis = window.result.analysis
                 report = {"files": len(analysis.dependencies), "calls": len(analysis.calls),
                           "classes": len(analysis.classes), "class_usages": len(analysis.class_usages),
                           "nodes": len(window.graph.nodes),
                           "diagnostics": window.result.diagnostics}
-                (output / "smoke.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+                if state["stage"] == "python":
+                    state["report"].update(report)
+                    state["stage"] = "ada"
+                    state["deadline"] = time.monotonic() + 60
+                    window.open_project(str(ada_example_path()))
+                    return
+                state["report"]["ada"] = report
+                (output / "smoke.json").write_text(
+                    json.dumps(state["report"], indent=2), encoding="utf-8",
+                )
+                timer.stop()
                 app.exit(0)
             except Exception as error:
                 (output / "smoke.json").write_text(json.dumps({"error": str(error)}), encoding="utf-8")
+                timer.stop()
                 app.exit(1)
 
         timer.timeout.connect(smoke)

@@ -90,8 +90,19 @@ def iter_python_files(
     Bare ignore patterns match basenames anywhere. Patterns containing slashes
     match paths relative to the analysis root. Ignored directories are pruned.
     """
+    yield from iter_source_files(project_path, (".py",), max_depth, ignore)
+
+
+def iter_source_files(
+    project_path: str,
+    extensions: Sequence[str],
+    max_depth: int | None = None,
+    ignore: Sequence[str] = (),
+) -> Iterator[str]:
+    """Walk source files with the shared depth, exclusion and glob semantics."""
     if max_depth is not None and max_depth < 0:
         raise ValueError("max_depth must be non-negative")
+    extensions = tuple(extension.casefold() for extension in extensions)
     rules = _ignore_rules(project_path, ignore)
     for root, directories, files in os.walk(project_path, onerror=_warn_unreadable):
         relative_root = os.path.relpath(root, project_path)
@@ -111,7 +122,7 @@ def iter_python_files(
             )
         for filename in sorted(files):
             full_path = os.path.join(root, filename)
-            if filename.endswith(".py") and not _is_ignored(
+            if filename.casefold().endswith(extensions) and not _is_ignored(
                 os.path.relpath(full_path, project_path), rules, False
             ):
                 yield full_path

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .models import FunctionCall, ImportReference, ProjectAnalysis
-from .utils import is_standard_or_external, resolve_import
+from .utils import is_external_reference, resolve_import
 
 
 def prepare_output_stem(output_path: str) -> str:
@@ -24,11 +24,14 @@ def prepare_output_stem(output_path: str) -> str:
 def format_text_report(
     dependencies: dict[str, list[ImportReference]], project_path: str,
     calls: Sequence[FunctionCall] = (),
+    language: str = "python",
 ) -> str:
     """Format the same plain-text report for stdout and UTF-8 file exports."""
-    lines = [f"Analysis of Python files in: {project_path}"]
+    language_name = "Ada" if language.casefold() == "ada" else "Python"
+    lines = [f"Analysis of {language_name} files in: {project_path}"]
     if not dependencies:
-        lines.append("\n(no Python files matched)")
+        empty_label = "Ada source files" if language_name == "Ada" else "Python files"
+        lines.append(f"\n(no {empty_label} matched)")
     calls_by_file = defaultdict(list)
     for call in calls:
         calls_by_file[call.source_file].append(call)
@@ -55,7 +58,9 @@ def format_ascii_report(analysis: ProjectAnalysis, project_path: str) -> str:
     """Render imports as a forest, expanding each file once and marking cycles."""
     lines = [f"Dependency tree: {project_path}"]
     if not analysis.dependencies:
-        return lines[0] + "\n(no Python files matched)\n"
+        language_name = "Ada" if analysis.language.casefold() == "ada" else "Python"
+        empty_label = "Ada source files" if language_name == "Ada" else "Python files"
+        return lines[0] + f"\n(no {empty_label} matched)\n"
 
     # Entries carry an optional target file; the traversal itself is iterative so
     # even long dependency chains do not exhaust Python's recursion limit.
@@ -74,7 +79,7 @@ def format_ascii_report(analysis: ProjectAnalysis, project_path: str) -> str:
                     incoming.add(target)
             else:
                 target = None
-                kind = "external" if is_standard_or_external(ref.base) else "unresolved"
+                kind = "external" if is_external_reference(ref) else "unresolved"
                 label = f"{ref} [{kind}]"
             children.append((label, target, ()))
         groups = calls_by_file[source]

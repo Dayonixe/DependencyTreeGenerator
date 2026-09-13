@@ -1,6 +1,7 @@
 .idea/
 venv/
 .pytest_cache/
+.pytest-*/
 src/__pycache__/
 tests/__pycache__/
 main.py

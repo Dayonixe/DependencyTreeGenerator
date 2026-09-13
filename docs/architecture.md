@@ -1,14 +1,16 @@
 # Architecture
 
-The command runs a static pipeline: discover source files, extract structured
-imports and calls, resolve them against canonical project module names, then build/export
-a directed graph. It does not import the analysed code.
+The command runs a static pipeline: detect Python or Ada, discover source files, extract
+structured dependencies and calls, resolve them against canonical project unit names,
+then build/export a directed graph. It does not import, execute or compile analysed code.
 
 | Module | Responsibility |
 | --- | --- |
 | `models.py` | Immutable import, function-call, class and inter-class usage records, the `ModuleMap` type and `ProjectAnalysis` result. |
 | `parser.py` | Shared depth/ignore filtering, declared source encodings, AST extraction, diagnostics and canonical module indexing. |
 | `call_analyzer.py` | Parse each selected file once, track lexical bindings and resolve explicit calls through module exports. |
+| `ada_analyzer.py` | Parse Ada units, context clauses, subprogram calls, tagged types, primitive operations and type extensions. |
+| `project_analyzer.py` | Detect the language and dispatch to the Python or Ada analyser. |
 | `utils.py` | Absolute/relative resolution and standard/installed module classification from names and metadata. |
 | `output.py` | Shared export paths, TXT and ASCII reports, cycle/shared-branch markers and UTF-8 text exports. |
 | `graph_generator.py` | Build an inspectable `Digraph`, normalise Windows paths and export DOT or native Graphviz formats. |
@@ -38,6 +40,15 @@ branches retain only bindings on which all alternatives agree. Re-export resolut
 follows explicit imports to their function definitions, with guards for circular
 references. Only calls with known definitions in other selected files are emitted.
 This does not execute code or infer object types and dynamic call targets.
+
+Ada units are indexed case-insensitively from their declared library-unit names, with
+GNAT-style filenames as a fallback. `.ads` specifications take precedence as dependency
+targets and `.adb` bodies link back to them. Context `with` clauses resolve exact units;
+Ada runtime roots are classified as external. Expanded and `use`-visible calls resolve
+against indexed subprogram declarations/bodies. Tagged declarations, interfaces and
+extensions become class cards; profile references associate primitive operations with
+their types. This lightweight static pass does not replace compiler semantic analysis,
+so ambiguous overloads and calls requiring object type inference remain unresolved.
 
 The same AST scan records class definitions, their direct methods and their written
 base expressions. Base bindings resolve through local definitions, explicit imports,
@@ -77,7 +88,7 @@ The legacy `--format` option is mutually exclusive with `--output`; `--export`
 continues to select the destination and defaults to PNG when no format is given.
 
 The CLI never imports Qt. The optional desktop entry point consumes `ProjectAnalysis`
-from `analyze_project()` with an optional `on_progress` callback for cancellation
+from the language-dispatching `analyze_project()` with an optional `on_progress` callback for cancellation
 checkpoints. A `QThread` owns analysis work; widgets are updated through queued Qt
 signals on the main thread. Cancelling or closing requests interruption and waits
 for the next checkpoint instead of terminating a thread during parsing.

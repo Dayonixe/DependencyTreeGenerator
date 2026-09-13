@@ -1,4 +1,4 @@
-"""Portable desktop workspace for exploring Python dependencies."""
+"""Portable desktop workspace for exploring Python and Ada dependencies."""
 
 import os
 from pathlib import Path
@@ -38,6 +38,10 @@ def example_path():
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "examples/advanced"
 
 
+def ada_example_path():
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "examples/ada_demo"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -62,7 +66,7 @@ class MainWindow(QMainWindow):
         self._filter_timer.setInterval(180)
         self._filter_timer.timeout.connect(self.refresh_graph)
         self.search.textChanged.connect(lambda: self._filter_timer.start())
-        self.statusBar().showMessage("Prêt · Choisissez un dossier Python ou ouvrez le projet d’exemple.")
+        self.statusBar().showMessage("Prêt · Choisissez un projet Python ou Ada.")
         self.graph.set_graph(ProjectGraph({}, []))
 
     def _build_ui(self):
@@ -83,7 +87,8 @@ class MainWindow(QMainWindow):
         row.addSpacing(18)
         row.addWidget(label("EXPLORATEUR DE DÉPENDANCES", "section"))
         row.addStretch()
-        row.addWidget(label("Python · Analyse locale", "badge"))
+        self.language_badge = label("Python / Ada · Détection auto", "badge")
+        row.addWidget(self.language_badge)
         self.export_button = QPushButton("Exporter  ▾")
         self.export_button.setEnabled(False)
         menu = QMenu(self)
@@ -118,13 +123,16 @@ class MainWindow(QMainWindow):
         self.browse_button.clicked.connect(self.choose_project)
         side.addWidget(self.browse_button)
         self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("Chemin du projet Python")
-        self.path_edit.setToolTip("Racine des imports Python ou dossier contenant __init__.py")
+        self.path_edit.setPlaceholderText("Chemin du projet Python ou Ada")
+        self.path_edit.setToolTip("Racine d’imports Python ou dossier de sources Ada")
         self.path_edit.returnPressed.connect(self.start_analysis)
         side.addWidget(self.path_edit)
-        self.example_button = QPushButton("Ouvrir l’exemple")
+        self.example_button = QPushButton("Ouvrir l’exemple Python")
         self.example_button.clicked.connect(lambda: self.open_project(str(example_path())))
         side.addWidget(self.example_button)
+        self.ada_example_button = QPushButton("Ouvrir l’exemple Ada")
+        self.ada_example_button.clicked.connect(lambda: self.open_project(str(ada_example_path())))
+        side.addWidget(self.ada_example_button)
         side.addSpacing(10)
         side.addWidget(label("02  /  OPTIONS D’ANALYSE", "section"))
         depth_row = QHBoxLayout()
@@ -138,7 +146,7 @@ class MainWindow(QMainWindow):
         side.addLayout(depth_row)
         side.addWidget(label("Exclusions · un motif par ligne"))
         self.ignore = QPlainTextEdit()
-        self.ignore.setPlaceholderText("tests\n**/generated_*.py")
+        self.ignore.setPlaceholderText("tests\n**/generated_*")
         self.ignore.setFixedHeight(80)
         self.ignore.setToolTip("Noms, chemins relatifs et motifs glob. Les environnements et caches sont déjà exclus.")
         side.addWidget(self.ignore)
@@ -174,7 +182,7 @@ class MainWindow(QMainWindow):
         title_row = QHBoxLayout()
         titles = QVBoxLayout()
         self.project_title = label("Explorez votre architecture", "title")
-        self.project_path = label("Imports, appels et relations entre vos modules Python.", "muted")
+        self.project_path = label("Imports, appels et relations entre vos unités de code.", "muted")
         self.project_path.setMaximumHeight(24)
         titles.addWidget(self.project_title)
         titles.addWidget(self.project_path)
@@ -333,7 +341,7 @@ class MainWindow(QMainWindow):
     def choose_project(self):
         if self.job:
             return
-        path = QFileDialog.getExistingDirectory(self, "Choisir un projet Python", self.path_edit.text())
+        path = QFileDialog.getExistingDirectory(self, "Choisir un projet Python ou Ada", self.path_edit.text())
         if path:
             self.open_project(path)
 
@@ -349,7 +357,7 @@ class MainWindow(QMainWindow):
         raw = self.path_edit.text().strip()
         root = Path(raw).expanduser() if raw else None
         if root is None or not root.is_dir():
-            QMessageBox.warning(self, "Dossier invalide", "Choisissez un dossier de projet Python existant.")
+            QMessageBox.warning(self, "Dossier invalide", "Choisissez un dossier de projet Python ou Ada existant.")
             return
         self._cancelled = False
         self.job = AnalysisJob(str(root.resolve()), None if self.depth.value() < 0 else self.depth.value(),
@@ -364,7 +372,7 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy):
         for widget in (self.path_edit, self.depth, self.ignore, self.analyze_button,
-                       self.browse_button, self.example_button):
+                       self.browse_button, self.example_button, self.ada_example_button):
             widget.setEnabled(not busy)
         self.progress.setVisible(busy)
         self.cancel_button.setVisible(busy)
@@ -401,6 +409,8 @@ class MainWindow(QMainWindow):
         self.project_path.setText(result.root)
         self.project_path.setToolTip(result.root)
         analysis = result.analysis
+        language_name = "Ada" if analysis.language == "ada" else "Python"
+        self.language_badge.setText(f"{language_name} · Analyse locale")
         values = [len(analysis.dependencies), sum(len(refs) for refs in analysis.dependencies.values()),
                   len(analysis.calls), len(result.diagnostics)]
         for widget, value in zip(self.stat_labels, values):
@@ -417,7 +427,9 @@ class MainWindow(QMainWindow):
         self.select_node("")
         self.tabs.setCurrentIndex(0)
         partial = "Analyse partielle" if result.diagnostics else "Analyse terminée"
-        self.statusBar().showMessage(f"{partial} · {values[0]} fichiers · {result.elapsed:.2f} s")
+        self.statusBar().showMessage(
+            f"{partial} · {language_name} · {values[0]} fichiers · {result.elapsed:.2f} s"
+        )
         QTimer.singleShot(0, self.graph.fit_graph)
 
     def _populate_tree(self):
@@ -465,7 +477,10 @@ class MainWindow(QMainWindow):
         class_total = self.class_diagram.matching_count
         class_shown = len(self.class_diagram.cards)
         if not self.result.analysis.classes:
-            self.class_notice.setText("Aucune classe Python trouvée dans les fichiers sélectionnés.")
+            message = ("Aucun type étiqueté Ada trouvé dans les fichiers sélectionnés."
+                       if self.result.analysis.language == "ada"
+                       else "Aucune classe Python trouvée dans les fichiers sélectionnés.")
+            self.class_notice.setText(message)
         elif class_total > class_shown:
             self.class_notice.setText(
                 f"{class_shown} classes affichées sur {class_total} correspondances · "
@@ -491,7 +506,8 @@ class MainWindow(QMainWindow):
 
     def _class_selected(self, info):
         source_path = info.file.replace("\\", "/")
-        self.node_title.setText("Classe " + info.name)
+        kind = "Type " if self.result.analysis.language == "ada" else "Classe "
+        self.node_title.setText(kind + info.name)
         self.node_path.setText(f"{source_path} · ligne {info.lineno}")
         self.outgoing.clear()
         self.incoming.clear()
@@ -605,8 +621,12 @@ class MainWindow(QMainWindow):
             path = (root / relative).resolve()
             if not path.is_relative_to(root):
                 raise OSError("Le lien pointe hors du dossier analysé.")
-            with tokenize.open(path) as source:
-                content = source.read(500_001)
+            if path.suffix.casefold() == ".py":
+                with tokenize.open(path) as source:
+                    content = source.read(500_001)
+            else:
+                with path.open(encoding="utf-8-sig") as source:
+                    content = source.read(500_001)
             truncated = len(content) > 500_000
             content = content[:500_000]
             self.source.setPlainText("\n".join(f"{index:4}  {text}" for index, text in enumerate(content.splitlines(), 1))
@@ -657,7 +677,10 @@ class MainWindow(QMainWindow):
                 Path(temporary).write_text(content, encoding="utf-8")
             else:
                 content = (format_ascii_report(analysis, root) if kind == "ascii" else
-                           format_text_report(analysis.dependencies, root, analysis.calls))
+                           format_text_report(
+                               analysis.dependencies, root, analysis.calls,
+                               language=analysis.language,
+                           ))
                 Path(temporary).write_text(content, encoding="utf-8")
             os.replace(temporary, target)
         finally:
@@ -666,7 +689,7 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         QMessageBox.information(self, "Utiliser Depviz",
-            "1. Choisissez une racine d’imports Python ou un package avec __init__.py.\n"
+            "1. Choisissez une racine d’imports Python ou un projet Ada contenant des fichiers .ads/.adb/.ada.\n"
             "2. Réglez la profondeur et les exclusions, puis lancez l’analyse (Ctrl+R).\n"
             "3. Cliquez sur les fichiers pour explorer leurs relations.\n\n"
             "Molette : zoom · Glisser le fond : déplacer la vue · Glisser un nœud : le repositionner.\n"
@@ -676,9 +699,8 @@ class MainWindow(QMainWindow):
             "L’onglet Appels ouvre les définitions par double-clic.\n\n"
             "PNG/SVG exportent le graphe ou le diagramme de classes affiché. DOT/TXT/ASCII exportent l’analyse complète.\n"
             "Le graphe affiche au maximum 500 nœuds à la fois ; utilisez la recherche et le voisinage.\n\n"
-            "Analyse statique : le projet n’est pas exécuté. Les appels dynamiques, les imports * et les types "
-            "d’objets ne sont pas inférés. La reconnaissance des bibliothèques installées dépend de "
-            "l’environnement de l’analyseur.\n\n"
+            "Analyse statique : le projet n’est pas exécuté ni compilé. Certains appels dynamiques, "
+            "surcharges et types d’objets ne peuvent pas être inférés.\n\n"
             "Version portable : aucun compte, serveur ou réglage dans le registre. Les fichiers source "
             "sont consultés en lecture seule.")
 

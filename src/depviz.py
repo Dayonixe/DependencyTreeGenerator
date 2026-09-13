@@ -9,7 +9,7 @@ if __name__ == "__main__" and not __package__:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
     __package__ = "src"
 
-from .call_analyzer import analyze_project
+from .project_analyzer import analyze_project
 from .output import export_text_report, format_ascii_report, format_text_report
 from .parser import AnalysisWarning
 
@@ -32,7 +32,7 @@ def _non_negative_integer(value: str) -> int:
 
 def create_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Static dependency analyser for Python projects.",
+        description="Static dependency analyser for Python and Ada projects.",
         allow_abbrev=False,
         epilog=(
             "TXT, ASCII and DOT go to stdout unless --export is supplied. PNG writes "
@@ -42,7 +42,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--path", required=True, type=_non_empty,
-        help="Python import root or package directory to analyse.",
+        help="Python or Ada project directory to analyse.",
+    )
+    parser.add_argument(
+        "--language", choices=["auto", "python", "ada"], default="auto",
+        help="Source language (auto-detected by default).",
     )
     formats = parser.add_mutually_exclusive_group()
     formats.add_argument(
@@ -86,7 +90,9 @@ def main(argv: list[str] | None = None) -> int:
 
     with warnings.catch_warnings(record=True) as diagnostics:
         warnings.simplefilter("always", AnalysisWarning)
-        analysis = analyze_project(project_path, args.max_depth, args.ignore)
+        analysis = analyze_project(
+            project_path, args.max_depth, args.ignore, language=args.language,
+        )
         deps, module_map = analysis.dependencies, analysis.module_map
 
     for diagnostic in diagnostics:
@@ -95,7 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     if output_format in ("txt", "ascii"):
         report = (
             format_ascii_report(analysis, project_path) if output_format == "ascii"
-            else format_text_report(deps, project_path, analysis.calls)
+            else format_text_report(
+                deps, project_path, analysis.calls, language=analysis.language,
+            )
         )
         if destination is None:
             sys.stdout.write(report)

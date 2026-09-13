@@ -187,6 +187,68 @@ def test_class_diagram_is_collapsed_and_opens_methods(window, app):
     assert service.pos() == expected
 
 
+def test_ada_project_uses_the_same_desktop_views(window, gui_project, app):
+    root = gui_project / "ada"
+    root.mkdir()
+    (root / "demo.gpr").write_text("project Demo is end Demo;\n", encoding="utf-8")
+    (root / "base.ads").write_text(
+        "package Base is\n"
+        "   type Root is tagged null record;\n"
+        "   procedure Visit (Self : Root);\n"
+        "end Base;\n", encoding="utf-8",
+    )
+    (root / "child.ads").write_text(
+        "with Base;\n"
+        "package Child is\n"
+        "   type Leaf is new Base.Root with null record;\n"
+        "   function Create return Leaf;\n"
+        "end Child;\n", encoding="utf-8",
+    )
+    (root / "child.adb").write_text(
+        "package body Child is\n"
+        "   function Create return Leaf is\n"
+        "   begin\n"
+        "      return (Base.Root with null record);\n"
+        "   end Create;\n"
+        "end Child;\n", encoding="utf-8",
+    )
+    (root / "main.adb").write_text(
+        "with Child;\n"
+        "procedure Main is\n"
+        "   Value : Child.Leaf := Child.Create;\n"
+        "begin\n"
+        "   null;\n"
+        "end Main;\n", encoding="utf-8",
+    )
+    (root / "broken.adb").write_text(
+        "procedure Broken is\n"
+        "begin\n"
+        "   Put_Line ((\"broken\");\n"
+        "end Broken;\n", encoding="utf-8",
+    )
+
+    window.open_project(str(root))
+    wait_for(lambda: window.job is None)
+    assert window.result.analysis.language == "ada"
+    assert window.language_badge.text() == "Ada · Analyse locale"
+    assert window.tabs.tabText(1) == "Classes (2)"
+    assert window.calls_table.rowCount() == 1
+    assert window.tabs.tabText(3) == "Diagnostics (1)"
+    assert "unclosed parenthesis" in window.diagnostics.toPlainText()
+    assert {item.node.label.replace("\\", "/") for item in window.graph.nodes.values()} == {
+        "base.ads", "broken.adb", "child.ads", "child.adb", "main.adb",
+    }
+
+    window.tabs.setCurrentWidget(window.class_page)
+    app.processEvents()
+    leaf = window.class_diagram.cards[class_id("child.ads", "Leaf")]
+    point = window.class_diagram.mapFromScene(leaf.sceneBoundingRect().center())
+    QTest.mouseClick(window.class_diagram.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert window.node_title.text() == "Type Leaf"
+    assert "type Leaf" in window.source.toPlainText()
+    assert window.detail_tabs.currentIndex() == 0
+
+
 @pytest.mark.parametrize("kind", ["png", "svg"])
 def test_class_diagram_export_uses_the_displayed_state(window, gui_project, kind):
     window.tabs.setCurrentWidget(window.class_page)

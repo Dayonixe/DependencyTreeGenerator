@@ -26,7 +26,7 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install -r config/requirements-build.txt
       - name: Test desktop behavior
-        run: python -m pytest tests/test_desktop_data.py tests/test_desktop_gui.py
+        run: python -m pytest tests/test_ada_analysis.py tests/test_desktop_data.py tests/test_desktop_gui.py
       - name: Build portable application
         run: python scripts/build_portable.py
       - name: Verify packaged application and exports
@@ -38,7 +38,8 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Packaged application failed' }
           $result = Get-Content (Join-Path $smokeOutput 'smoke.json') | ConvertFrom-Json
           if ($result.files -ne 6 -or $result.calls -ne 4 -or $result.classes -ne 3 -or $result.class_usages -ne 1 -or $result.diagnostics.Count -ne 0) { throw 'Unexpected packaged analysis' }
-          foreach ($name in @('graph.png', 'graph.svg', 'classes.png', 'classes.svg', 'graph.dot', 'graph.txt', 'tree.txt', 'window.png')) {
+          if ($result.ada.files -ne 7 -or $result.ada.calls -ne 4 -or $result.ada.classes -ne 3 -or $result.ada.class_usages -ne 2 -or $result.ada.diagnostics.Count -ne 0) { throw 'Unexpected packaged Ada analysis' }
+          foreach ($name in @('graph.png', 'graph.svg', 'classes.png', 'classes.svg', 'graph.dot', 'graph.txt', 'tree.txt', 'window.png', 'ada-graph.png', 'ada-graph.svg', 'ada-classes.png', 'ada-classes.svg', 'ada-graph.dot', 'ada-graph.txt', 'ada-tree.txt', 'ada-window.png')) {
             if ((Get-Item (Join-Path $smokeOutput $name)).Length -eq 0) { throw "Empty export: $name" }
           }
       - uses: actions/upload-artifact@v4

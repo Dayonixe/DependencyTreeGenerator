@@ -44,8 +44,11 @@ class FileItem(QGraphicsObject):
         painter.drawRoundedRect(QRectF(13, 17, 32, 32), 7, 7)
         painter.setPen(QColor("white"))
         painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        suffix = Path(self.node.label).suffix.casefold()
         badge = "PK" if self.node.label.endswith("__init__.py") else (
-            "PY" if self.node.kind == "internal" else "EX" if self.node.kind == "external" else "?"
+            "AD" if suffix in {".ads", ".adb", ".ada"} else
+            "PY" if self.node.kind == "internal" else
+            "EX" if self.node.kind == "external" else "?"
         )
         painter.drawText(QRectF(13, 17, 32, 32), Qt.AlignmentFlag.AlignCenter, badge)
         painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))

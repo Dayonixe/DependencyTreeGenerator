@@ -126,6 +126,7 @@ def test_help_works_for_both_entrypoints_without_dependencies(entrypoint):
     assert "--output" in result.stdout
     assert "--max-depth" in result.stdout
     assert "--ignore" in result.stdout
+    assert "--language" in result.stdout
     assert result.stderr == ""
 
 

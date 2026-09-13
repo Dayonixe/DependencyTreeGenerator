@@ -8,6 +8,7 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=[(str(root / "examples/advanced"), "examples/advanced"),
+           (str(root / "examples/ada_demo"), "examples/ada_demo"),
            (str(root / "docs/desktop.md"), "docs")],
     hiddenimports=[],
     hookspath=[],
