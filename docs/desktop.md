@@ -1,4 +1,4 @@
-# Depviz Desktop 1.1.0
+# Depviz Desktop 1.2.0
 
 Depviz Desktop is a portable graphical explorer for Python and Ada project dependencies.
 It detects the project language and uses the same static dependency and inter-unit call
@@ -6,20 +6,22 @@ analysis as the CLI.
 
 ## Windows portable application
 
-Extract the entire `Depviz-1.1.0-windows-amd64-portable.zip` archive, then double-click
+Extract the entire `Depviz-1.2.0-windows-amd64-portable.zip` archive, then double-click
 `Depviz/Depviz.exe`. Keep the executable and its `_internal` directory together.
 Python, Qt and the required Python libraries are included. No installer, administrator
 account, network service or native Graphviz installation is needed to use the GUI.
-No application settings are written to the registry; the current session stays in
-memory. Exported reports are written only to the location you choose.
+No application settings are written to the registry. The selected appearance is stored
+in `Depviz/depviz-settings.json`, beside the portable executable, so it follows the
+application when its folder is moved. Exported reports are written only to the location
+you choose.
 
 This build targets Windows 10/11 x64. The Python sources can also be run with Qt on other
 desktop systems; this release's packaged executable is for Windows.
 
 ## Explore a project
 
-1. Click **Choisir un dossier…**, drop a project folder onto the window, or open one
-   of the included Python and Ada examples. The header shows the detected language.
+1. Click **Choisir un dossier…**, drop a project folder onto the window, or use
+   **Aide > Ouvrir l’exemple Python/Ada**. The header shows the detected language.
 2. Choose the directory depth: **Illimitée** visits all selected subdirectories;
    **0** visits only the root. Enter one exclusion pattern per line. The syntax
    matches the CLI's `--ignore`, including `tests`, `pkg/generated.py` and `**/test_*.py`.
@@ -36,6 +38,11 @@ The project root has the same meaning as `--path` in the CLI: select a Python im
 root/package directory, or a directory containing Ada `.ads`/`.adb`/`.ada` sources. The
 analysed code is never imported, executed or compiled. Existing CLI commands remain
 available, including `--language` when automatic detection needs an override.
+
+The **Aide** menu also opens the user guide and the **À propos** dialog, which reports
+the application, Python, Qt, PySide6 and graphviz library versions. Choose **Thème >
+Système**, **Clair** or **Sombre** there. **Système** is the default and follows the
+operating-system appearance; the portable JSON preference is restored on the next launch.
 
 ## Graph controls
 

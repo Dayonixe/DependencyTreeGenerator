@@ -48,8 +48,9 @@ interactive dependency
 graph, collapsible class diagram with inheritance, inter-class usages and methods,
 search and display
 filters, project file tree, function-call navigation, read-only source inspector,
-cancellable background analysis and PNG/SVG/DOT/TXT/ASCII exports. The portable ZIP
-includes Python and Qt and needs no native Graphviz.
+cancellable background analysis, light/dark/system themes and PNG/SVG/DOT/TXT/ASCII
+exports. The portable ZIP includes Python and Qt and needs no native Graphviz. Its theme
+preference is kept in a portable JSON file beside the executable.
 
 ```bash
 python -m pip install -r config/requirements-gui.txt
@@ -297,5 +298,14 @@ and Windows (Python 3.12).
 
 ## Result
 
-Here is an example of the results achieved with this project:
+### Desktop application
+
+The same Python and Ada analysis is available in the interactive portable application:
+
+<img src="docs/application.png" alt="Depviz desktop application showing an interactive class diagram" />
+
+### Exported dependency graph
+
+Here is an example of an exported graph:
+
 <img src="docs/graph.png" alt="graph" />

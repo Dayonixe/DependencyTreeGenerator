@@ -2,12 +2,17 @@
 
 import os
 from pathlib import Path
+import platform
 import sys
 import tempfile
 import tokenize
 
-from PySide6.QtCore import Qt, QTimer, QSignalBlocker
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QTextCursor, QTextCharFormat
+from PySide6 import __version__ as PYSIDE_VERSION
+from PySide6.QtCore import QPointF, Qt, QTimer, QSignalBlocker, qVersion
+from PySide6.QtGui import (
+    QAction, QActionGroup, QColor, QFont, QKeySequence, QPainter, QPen, QPolygonF,
+    QTextCursor, QTextCharFormat,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
@@ -22,7 +27,8 @@ from . import VERSION
 from .class_diagram import ClassDiagramView
 from .data import ProjectGraph, file_id, select_graph
 from .graph import GraphView
-from .theme import STYLE, app_icon
+from .settings import load_theme_preference, save_theme_preference, settings_path
+from .theme import apply_application_theme, app_icon, theme_colors
 from .worker import AnalysisJob, AnalysisResult
 
 
@@ -42,6 +48,67 @@ def ada_example_path():
     return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "examples/ada_demo"
 
 
+class LegendSwatch(QWidget):
+    """Small painted relation sample that does not depend on symbol fonts."""
+
+    def __init__(self, kind, color):
+        super().__init__()
+        self.kind, self.color = kind, color
+        self.setFixedSize(30, 22)
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.kind == "node":
+            painter.setPen(Qt.PenStyle.NoPen)
+            for x, color in ((7, "#198678"), (15, "#b57a22"), (23, "#c65e64")):
+                painter.setBrush(QColor(color))
+                painter.drawEllipse(QPointF(x, 11), 4, 4)
+            return
+        if self.kind == "class":
+            painter.setPen(QPen(QColor(self.color), 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(4, 3, 22, 16, 3, 3)
+            painter.drawLine(5, 9, 25, 9)
+            return
+        pen = QPen(QColor(self.color), 2)
+        if self.kind in {"call", "usage"}:
+            pen.setStyle(Qt.PenStyle.DashLine)
+            pen.setDashPattern([4, 3])
+        painter.setPen(pen)
+        painter.drawLine(QPointF(2, 11), QPointF(25, 11))
+        arrow = QPolygonF([QPointF(25, 11), QPointF(19, 7), QPointF(19, 15)])
+        if self.kind == "inheritance":
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        else:
+            painter.setBrush(QColor(self.color))
+        painter.drawPolygon(arrow)
+
+
+def legend_bar(entries):
+    """Create the shared, explicit legend used by both visual canvases."""
+    frame = QFrame()
+    frame.setObjectName("legendBar")
+    row = QHBoxLayout(frame)
+    row.setContentsMargins(12, 7, 12, 7)
+    row.setSpacing(18)
+    for kind, title, detail, color in entries:
+        item = QFrame()
+        item.setObjectName("legendItem")
+        item_row = QHBoxLayout(item)
+        item_row.setContentsMargins(0, 0, 0, 0)
+        item_row.setSpacing(7)
+        item_row.addWidget(LegendSwatch(kind, color))
+        text = QVBoxLayout()
+        text.setSpacing(0)
+        text.addWidget(label(title, "legendTitle"))
+        text.addWidget(label(detail, "legendDetail"))
+        item_row.addLayout(text)
+        row.addWidget(item)
+    row.addStretch()
+    return frame
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -52,13 +119,19 @@ class MainWindow(QMainWindow):
         self._closing = False
         self._class_fit_pending = False
         self._tree_items = {}
+        self.theme_preference = load_theme_preference()
+        self.resolved_theme = "light"
         self.setWindowTitle(f"Depviz {VERSION} — Explorateur de dépendances")
         self.setWindowIcon(app_icon())
         self.resize(1480, 920)
         self.setMinimumSize(1100, 700)
-        self.setStyleSheet(STYLE)
         self.setAcceptDrops(True)
         self._build_ui()
+        self._apply_theme()
+        try:
+            QApplication.instance().styleHints().colorSchemeChanged.connect(self._system_theme_changed)
+        except AttributeError:
+            pass
         self.tabs.currentChanged.connect(self._tab_changed)
         self._shortcuts()
         self._filter_timer = QTimer(self)
@@ -98,9 +171,32 @@ class MainWindow(QMainWindow):
             menu.addAction(title, lambda kind=kind: self.choose_export(kind))
         self.export_button.setMenu(menu)
         row.addWidget(self.export_button)
-        help_button = QPushButton("Aide")
-        help_button.clicked.connect(self.show_help)
-        row.addWidget(help_button)
+        self.help_button = QPushButton("Aide  ▾")
+        self.help_menu = QMenu(self)
+        self.help_action = self.help_menu.addAction("Afficher l’aide", self.show_help)
+        self.help_menu.addSeparator()
+        self.python_example_action = self.help_menu.addAction(
+            "Ouvrir l’exemple Python", lambda: self.open_project(str(example_path()))
+        )
+        self.ada_example_action = self.help_menu.addAction(
+            "Ouvrir l’exemple Ada", lambda: self.open_project(str(ada_example_path()))
+        )
+        self.help_menu.addSeparator()
+        theme_menu = self.help_menu.addMenu("Thème")
+        self.theme_group = QActionGroup(self)
+        self.theme_group.setExclusive(True)
+        self.theme_actions = {}
+        for title, preference in (("Système", "system"), ("Clair", "light"), ("Sombre", "dark")):
+            action = theme_menu.addAction(title)
+            action.setCheckable(True)
+            action.setData(preference)
+            action.triggered.connect(lambda checked=False, value=preference: self.set_theme(value))
+            self.theme_group.addAction(action)
+            self.theme_actions[preference] = action
+        self.help_menu.addSeparator()
+        self.about_action = self.help_menu.addAction("À propos de Depviz", self.show_about)
+        self.help_button.setMenu(self.help_menu)
+        row.addWidget(self.help_button)
         outer.addWidget(header)
 
         body = QSplitter(Qt.Orientation.Horizontal)
@@ -127,12 +223,6 @@ class MainWindow(QMainWindow):
         self.path_edit.setToolTip("Racine d’imports Python ou dossier de sources Ada")
         self.path_edit.returnPressed.connect(self.start_analysis)
         side.addWidget(self.path_edit)
-        self.example_button = QPushButton("Ouvrir l’exemple Python")
-        self.example_button.clicked.connect(lambda: self.open_project(str(example_path())))
-        side.addWidget(self.example_button)
-        self.ada_example_button = QPushButton("Ouvrir l’exemple Ada")
-        self.ada_example_button.clicked.connect(lambda: self.open_project(str(ada_example_path())))
-        side.addWidget(self.ada_example_button)
         side.addSpacing(10)
         side.addWidget(label("02  /  OPTIONS D’ANALYSE", "section"))
         depth_row = QHBoxLayout()
@@ -172,7 +262,6 @@ class MainWindow(QMainWindow):
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tree.itemSelectionChanged.connect(self._tree_selection)
         side.addWidget(self.tree, 1)
-        side.addWidget(label(f"PORTABLE  /  v{VERSION}", "section"))
         body.addWidget(sidebar)
 
         center = QFrame()
@@ -225,8 +314,13 @@ class MainWindow(QMainWindow):
         graph_layout.addWidget(self.graph, 1)
         self.graph_notice = label("Ouvrez un projet pour commencer.", "muted", True)
         graph_layout.addWidget(self.graph_notice)
+        self.graph_legend = legend_bar([
+            ("node", "Fichier", "vert : projet · ambre : externe · rouge : non résolu", "#198678"),
+            ("import", "Import / with", "trait continu vers l’unité utilisée", "#7c91a0"),
+            ("call", "Appel", "pointillés violets vers la définition", "#8a64c1"),
+        ])
+        graph_layout.addWidget(self.graph_legend)
         navigation = QHBoxLayout()
-        navigation.addWidget(label("● Fichiers   ─ Imports   ┄ Appels", "muted"))
         navigation.addStretch()
         for text, action in [("−", lambda: self.graph.zoom(1 / 1.2)), ("+", lambda: self.graph.zoom(1.2)),
                              ("Cadrer", self.graph.fit_graph), ("Réorganiser", self.relayout)]:
@@ -250,10 +344,13 @@ class MainWindow(QMainWindow):
             "muted", True,
         )
         class_layout.addWidget(self.class_notice)
+        self.class_legend = legend_bar([
+            ("class", "Classe / type", "cliquez sur la carte pour afficher ses méthodes", "#198678"),
+            ("inheritance", "Héritage", "flèche grise dirigée vers la classe parente", "#6c8796"),
+            ("usage", "Utilisation", "pointillés violets vers la classe appelée", "#8a64c1"),
+        ])
+        class_layout.addWidget(self.class_legend)
         class_navigation = QHBoxLayout()
-        class_navigation.addWidget(label(
-            "Trait gris : héritage · Pointillés violets : utilisation", "muted",
-        ))
         class_navigation.addStretch()
         for text, action in [
             ("Tout replier", lambda: self.class_diagram.set_all_expanded(False)),
@@ -338,6 +435,36 @@ class MainWindow(QMainWindow):
             action.triggered.connect(callback)
             self.addAction(action)
 
+    def _apply_theme(self):
+        app = QApplication.instance()
+        if app is None:
+            return
+        self.resolved_theme = apply_application_theme(app, self.theme_preference)
+        for preference, action in self.theme_actions.items():
+            action.setChecked(preference == self.theme_preference)
+        self.graph.apply_theme(self.resolved_theme)
+        self.class_diagram.apply_theme(self.resolved_theme)
+        self.update()
+
+    def set_theme(self, preference):
+        """Apply and persist a theme selected from the Help menu."""
+        self.theme_preference = preference
+        self._apply_theme()
+        try:
+            destination = save_theme_preference(preference)
+        except OSError as error:
+            QMessageBox.warning(
+                self, "Préférence non enregistrée",
+                "Le thème est appliqué pour cette session, mais sa préférence n’a pas pu être "
+                f"enregistrée.\n\n{error}",
+            )
+        else:
+            self.statusBar().showMessage(f"Thème enregistré · {destination}", 4000)
+
+    def _system_theme_changed(self, *_args):
+        if self.theme_preference == "system":
+            self._apply_theme()
+
     def choose_project(self):
         if self.job:
             return
@@ -372,8 +499,10 @@ class MainWindow(QMainWindow):
 
     def _set_busy(self, busy):
         for widget in (self.path_edit, self.depth, self.ignore, self.analyze_button,
-                       self.browse_button, self.example_button, self.ada_example_button):
+                       self.browse_button):
             widget.setEnabled(not busy)
+        self.python_example_action.setEnabled(not busy)
+        self.ada_example_action.setEnabled(not busy)
         self.progress.setVisible(busy)
         self.cancel_button.setVisible(busy)
         self.cancel_button.setEnabled(busy)
@@ -637,7 +766,7 @@ class MainWindow(QMainWindow):
                 self.source.setTextCursor(cursor)
                 selection = QTextEdit.ExtraSelection()
                 selection.cursor = cursor
-                selection.format.setBackground(QColor("#dff2eb"))
+                selection.format.setBackground(QColor(theme_colors(self.resolved_theme)["highlight_line"]))
                 selection.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
                 self.source.setExtraSelections([selection])
                 self.source.centerCursor()
@@ -703,6 +832,27 @@ class MainWindow(QMainWindow):
             "surcharges et types d’objets ne peuvent pas être inférés.\n\n"
             "Version portable : aucun compte, serveur ou réglage dans le registre. Les fichiers source "
             "sont consultés en lecture seule.")
+
+    def show_about(self):
+        try:
+            import graphviz
+            graphviz_version = graphviz.__version__
+        except (ImportError, AttributeError):
+            graphviz_version = "non disponible"
+        architecture = platform.machine() or platform.architecture()[0]
+        mode = "application portable" if getattr(sys, "frozen", False) else "sources Python"
+        QMessageBox.about(
+            self,
+            "À propos de Depviz",
+            f"Depviz {VERSION}\n\n"
+            "Explorateur graphique de dépendances Python et Ada.\n"
+            "Analyse statique, locale et en lecture seule.\n\n"
+            f"Python {platform.python_version()} · {architecture}\n"
+            f"Qt {qVersion()} · PySide6 {PYSIDE_VERSION}\n"
+            f"graphviz (bibliothèque Python) {graphviz_version}\n\n"
+            f"Exécution : {mode}\n"
+            f"Préférences : {settings_path()}",
+        )
 
     def dragEnterEvent(self, event):
         urls = event.mimeData().urls()

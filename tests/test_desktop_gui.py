@@ -10,9 +10,10 @@ pytest.importorskip("PySide6.QtWidgets", reason="Install config/requirements-gui
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QFontDatabase, QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton
 
 from src.call_analyzer import analyze_project
+from src.desktop import VERSION
 from src.desktop.class_diagram import class_id
 from src.desktop.data import build_project_graph, file_id
 from src.desktop.window import MainWindow
@@ -85,6 +86,54 @@ def test_worker_ui_matches_shared_analysis(window, gui_project):
     assert len(window.graph.nodes) == 4
     assert window.export_button.isEnabled() and window.analyze_button.isEnabled()
     assert not window.progress.isVisible()
+
+
+def test_help_menu_collects_examples_themes_and_about(window, monkeypatch):
+    root_actions = [action.text() for action in window.help_menu.actions()]
+    assert root_actions == [
+        "Afficher l’aide", "", "Ouvrir l’exemple Python", "Ouvrir l’exemple Ada",
+        "", "Thème", "", "À propos de Depviz",
+    ]
+    assert [action.text() for action in window.theme_group.actions()] == ["Système", "Clair", "Sombre"]
+    assert window.theme_actions[window.theme_preference].isChecked()
+    assert not any(
+        button.text() in {"Ouvrir l’exemple Python", "Ouvrir l’exemple Ada"}
+        for button in window.findChildren(QPushButton)
+    )
+    assert not any(f"v{VERSION}" in widget.text() for widget in window.findChildren(QLabel))
+
+    messages = []
+    monkeypatch.setattr(QMessageBox, "about", lambda *args: messages.append(args[2]))
+    window.show_about()
+    assert f"Depviz {VERSION}" in messages[0]
+    assert "Python " in messages[0] and "Qt " in messages[0] and "PySide6 " in messages[0]
+    assert "graphviz" in messages[0] and "Préférences" in messages[0]
+
+
+def test_theme_choice_is_applied_and_restored(app, gui_project, monkeypatch):
+    settings_file = gui_project / "depviz-settings.json"
+    monkeypatch.setenv("DEPVIZ_SETTINGS_PATH", str(settings_file))
+    first = MainWindow()
+    assert first.theme_preference == "system"
+    assert first.theme_actions["system"].isChecked()
+
+    first.theme_actions["dark"].trigger()
+    assert first.theme_preference == "dark"
+    assert first.resolved_theme == "dark"
+    assert first.graph.colors["canvas"] == "#101b23"
+    assert first.class_diagram.colors["canvas"] == "#101b23"
+    assert '"theme": "dark"' in settings_file.read_text(encoding="utf-8")
+    first.close()
+    first.deleteLater()
+    app.processEvents()
+
+    restored = MainWindow()
+    assert restored.theme_preference == "dark"
+    assert restored.theme_actions["dark"].isChecked()
+    assert restored.resolved_theme == "dark"
+    restored.close()
+    restored.deleteLater()
+    app.processEvents()
 
 
 def test_graph_selection_drag_zoom_and_filters(window):

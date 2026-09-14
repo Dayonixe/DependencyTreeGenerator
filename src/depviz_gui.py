@@ -66,6 +66,8 @@ def main(argv=None):
                 window.select_node(key)
                 window.graph.fit_graph()
                 prefix = "" if state["stage"] == "python" else "ada-"
+                app.processEvents()
+                window.grab().save(str(output / (prefix + "graph-window.png")))
                 for kind in ("png", "svg", "dot", "txt", "ascii"):
                     name = prefix + ("graph." + kind if kind != "ascii" else "tree.txt")
                     window.export_to(str(output / name), kind)

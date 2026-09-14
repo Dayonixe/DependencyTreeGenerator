@@ -6,21 +6,22 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtSvg import QSvgGenerator
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsObject, QGraphicsPathItem, QGraphicsScene, QGraphicsView
 
 from .data import Edge, Node, ProjectGraph, layered_layout
+from .theme import theme_colors
 
 
-COLORS = {"internal": "#158578", "external": "#b57a22", "unknown": "#c65e64"}
-BACKGROUND = "#f5f7fa"
+BACKGROUND = theme_colors("light")["canvas"]
 
 
 class FileItem(QGraphicsObject):
     WIDTH, HEIGHT = 240, 68
 
-    def __init__(self, node: Node):
+    def __init__(self, node: Node, colors):
         super().__init__()
         self.node = node
+        self.colors = colors
         self.edges = []
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable
                       | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -35,10 +36,11 @@ class FileItem(QGraphicsObject):
     def paint(self, painter, option, widget=None):
         selected = self.isSelected()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor("#158578" if selected else "#d8e1e8"), 2 if selected else 1))
-        painter.setBrush(QColor("#132c3a" if selected else "#ffffff"))
+        painter.setPen(QPen(QColor(self.colors["selected_border"] if selected else self.colors["card_border"]),
+                            2 if selected else 1))
+        painter.setBrush(QColor(self.colors["selected_card"] if selected else self.colors["card"]))
         painter.drawRoundedRect(QRectF(0, 0, self.WIDTH, self.HEIGHT), 9, 9)
-        color = QColor(COLORS[self.node.kind])
+        color = QColor(self.colors[self.node.kind])
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
         painter.drawRoundedRect(QRectF(13, 17, 32, 32), 7, 7)
@@ -52,7 +54,7 @@ class FileItem(QGraphicsObject):
         )
         painter.drawText(QRectF(13, 17, 32, 32), Qt.AlignmentFlag.AlignCenter, badge)
         painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
-        painter.setPen(QColor("#ffffff" if selected else "#243746"))
+        painter.setPen(QColor(self.colors["selected_text"] if selected else self.colors["card_text"]))
         label = self.node.label.rsplit("/", 1)[-1]
         label = painter.fontMetrics().elidedText(label, Qt.TextElideMode.ElideMiddle, 172)
         painter.drawText(QRectF(56, 12, 174, 23), Qt.AlignmentFlag.AlignVCenter, label)
@@ -60,7 +62,7 @@ class FileItem(QGraphicsObject):
             "internal": "Racine du projet", "external": "Bibliothèque externe", "unknown": "Import non résolu",
         }[self.node.kind]
         painter.setFont(QFont("Segoe UI", 8))
-        painter.setPen(QColor("#b4c9d3" if selected else "#7d8d9a"))
+        painter.setPen(QColor(self.colors["selected_muted"] if selected else self.colors["card_muted"]))
         parent = painter.fontMetrics().elidedText(parent, Qt.TextElideMode.ElideMiddle, 172)
         painter.drawText(QRectF(56, 36, 174, 19), Qt.AlignmentFlag.AlignVCenter, parent)
 
@@ -72,17 +74,23 @@ class FileItem(QGraphicsObject):
 
 
 class ConnectionItem(QGraphicsPathItem):
-    def __init__(self, edge: Edge, source: FileItem, target: FileItem):
+    def __init__(self, edge: Edge, source: FileItem, target: FileItem, colors):
         super().__init__()
         self.edge, self.source, self.target = edge, source, target
+        self.colors = colors
         source.edges.append(self)
         target.edges.append(self)
         self.arrow = QPolygonF()
         self.setZValue(0)
-        self.setPen(QPen(QColor("#9375c5" if edge.kind == "call" else "#9caebc"), 1.5,
-                         Qt.PenStyle.DashLine if edge.kind == "call" else Qt.PenStyle.SolidLine))
+        self.apply_theme(colors)
         self.setToolTip(("Appels" if edge.kind == "call" else "Imports") + "\n" + "\n".join(edge.labels))
         self.update_path()
+
+    def apply_theme(self, colors):
+        self.colors = colors
+        self.setPen(QPen(QColor(colors["call_edge"] if self.edge.kind == "call" else colors["import_edge"]),
+                         1.7, Qt.PenStyle.DashLine if self.edge.kind == "call" else Qt.PenStyle.SolidLine))
+        self.update()
 
     def update_path(self):
         offset = 10 if self.edge.kind == "call" else -7
@@ -122,19 +130,23 @@ class GraphView(QGraphicsView):
         self.nodes: dict[str, FileItem] = {}
         self.connections: list[ConnectionItem] = []
         self.positions = {}
+        app = QApplication.instance()
+        self.theme_name = app.property("depvizResolvedTheme") if app else "light"
+        self.colors = theme_colors(self.theme_name or "light")
+        self.empty_item = None
         self.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-        self.setBackgroundBrush(QColor(BACKGROUND))
+        self.setBackgroundBrush(QColor(self.colors["canvas"]))
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
         self.scene().selectionChanged.connect(self._selection_changed)
 
     def drawBackground(self, painter, rect):
-        painter.fillRect(rect, QColor(BACKGROUND))
+        painter.fillRect(rect, QColor(self.colors["canvas"]))
         # Avoid generating millions of dots when a large graph is zoomed out.
         step = max(24, math.ceil(12 / max(.03, self.transform().m11()) / 24) * 24)
-        painter.setPen(QPen(QColor("#dce4ec"), 1))
+        painter.setPen(QPen(QColor(self.colors["grid"]), 1))
         for x in range(math.floor(rect.left() / step) * step, math.ceil(rect.right()), step):
             for y in range(math.floor(rect.top() / step) * step, math.ceil(rect.bottom()), step):
                 painter.drawPoint(QPointF(x, y))
@@ -147,27 +159,44 @@ class GraphView(QGraphicsView):
         with QSignalBlocker(self.scene()):
             self.scene().clear()
             self.nodes, self.connections = {}, []
+            self.empty_item = None
             # The desktop canvas is taller than a horizontal import chain. Turn
             # dependency levels into rows so file names remain readable at fit.
             positions = {key: (y / 108 * 290, x / 340 * 140)
                          for key, (x, y) in layered_layout(graph).items()}
             for key, node in graph.nodes.items():
-                item = FileItem(node)
+                item = FileItem(node, self.colors)
                 self.scene().addItem(item)
                 item.setPos(*self.positions.get(key, positions[key]))
                 self.nodes[key] = item
             for edge in graph.edges:
-                connection = ConnectionItem(edge, self.nodes[edge.source], self.nodes[edge.target])
+                connection = ConnectionItem(edge, self.nodes[edge.source], self.nodes[edge.target], self.colors)
                 self.scene().addItem(connection)
                 self.connections.append(connection)
             if not self.nodes:
-                text = self.scene().addText("Aucun fichier à afficher.\nOuvrez un projet ou ajustez les filtres.")
-                text.setDefaultTextColor(QColor("#778b9a"))
-                text.setFont(QFont("Segoe UI", 13))
+                self.empty_item = self.scene().addText(
+                    "Aucun fichier à afficher.\nOuvrez un projet ou ajustez les filtres."
+                )
+                self.empty_item.setDefaultTextColor(QColor(self.colors["subtle"]))
+                self.empty_item.setFont(QFont("Segoe UI", 13))
             if selected in self.nodes:
                 self.nodes[selected].setSelected(True)
             self.scene().setSceneRect(self.scene().itemsBoundingRect().adjusted(-70, -70, 70, 70))
         self._emphasize(selected if selected in self.nodes else "")
+
+    def apply_theme(self, name: str):
+        """Repaint the scene without changing positions, selection or zoom."""
+        self.theme_name = name
+        self.colors = theme_colors(name)
+        self.setBackgroundBrush(QColor(self.colors["canvas"]))
+        for item in self.nodes.values():
+            item.colors = self.colors
+            item.update()
+        for connection in self.connections:
+            connection.apply_theme(self.colors)
+        if self.empty_item is not None:
+            self.empty_item.setDefaultTextColor(QColor(self.colors["subtle"]))
+        self.viewport().update()
 
     def _emphasize(self, selected):
         related = {selected}
@@ -228,7 +257,7 @@ class GraphView(QGraphicsView):
             device = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
             if device.isNull():
                 raise OSError("Image trop grande pour la mémoire disponible.")
-            device.fill(QColor(BACKGROUND))
+            device.fill(QColor(self.colors["canvas"]))
         painter = QPainter()
         if not painter.begin(device):
             raise OSError(f"Impossible d'écrire l'image : {filename}")
